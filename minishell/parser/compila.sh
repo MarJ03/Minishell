@@ -1,0 +1,1 @@
+gcc parserTest.c –o parser
