@@ -43,11 +43,8 @@ int main() {
         }
 
         // Solo procesar un comando en esta implementación inicial
-        if (parsed_line->ncommands == 1) {
-            process_command(parsed_line);
-        } else {
-            fprintf(stderr, "Error: Solo se permite un comando por línea.\n");
-        }
+        process_command(parsed_line);
+
     }
 
     return 0;
@@ -55,7 +52,7 @@ int main() {
 
 // Procesar y ejecutar un comando
 void process_command(tline *cmd) {
-    pid_t child_pid;
+    pid_t pid;
 
     // Comprobar si es un comando interno (cd o exit)
     if (strcmp(cmd->commands[0].argv[0], "cd") == 0) {
@@ -68,29 +65,71 @@ void process_command(tline *cmd) {
         return;
     }
 
-    // Crear un proceso hijo para ejecutar comandos externos
-    child_pid = fork();
-    if (child_pid < 0) { // Error en fork
-        perror("Error al crear el proceso");
-        exit(1);
+    if (strcmp(cmd->commands[0].argv[0], "umask") == 0) {
+        //run_umask(); // Salir de la MiniShell
+        return;
     }
-    if (child_pid == 0) { // Código que ejecuta el hijo
-        if (cmd->redirect_input) { // Redirigir entrada si es necesario
-            input_redirect(cmd->redirect_input);
-        }
-        if (cmd->redirect_output) { // Redirigir salida si es necesario
-            output_redirect(cmd->redirect_output);
-        }
 
-        // Ejecutar el comando usando execvp
-        execvp(cmd->commands[0].argv[0], cmd->commands[0].argv);
+    //Si es un comando externo...
+    //Se crea el array de arrays de pipes (casillas = numero de comandos - 1)
+    int** pipe_array = (int**) malloc((cmd->ncommands - 1) * sizeof(int*));
 
-        // Si execvp falla, se notifica el error y se finaliza
-        fprintf(stderr, "%s: Comando no encontrado\n", cmd->commands[0].argv[0]);
-        exit(2);
-    } else { // Código que ejecuta el padre
-        waitpid(child_pid, NULL, 0); // Esperar a que termine el proceso hijo
+    //Se crea un array de 2 enteros por cada pipe
+    for(int i = 0; i < cmd->ncommands - 1; i++) {
+        pipe_array[i] = (int*)malloc(2*sizeof(int));
+        int info = pipe(pipe_array[i]);
+        if(info < 0) {
+            printf("Error creando la pipe %d",i);
+        }
     }
+
+    //Se crea el array de pids (uno por cada proceso)
+    int* pid_array = (int*)malloc(cmd->ncommands * sizeof(int));
+
+    //Por cada comando que se tenga que ejecutar
+    for(int j=0; j<cmd->ncommands; j++) {
+
+        //A partir de aquí hay que distinguir entre código ejecutado por el padre y por el hijo
+        pid = fork();
+        if (pid < 0) { // Error en fork
+            perror("Error al crear el proceso");
+            exit(1);
+        }
+        pid_array[j] = pid;
+
+        if(pid == 0) { //Soy el hijo
+
+            //Cada proceso hijo solo escribe en el pipe al siguiente hijo, pero solo lee en el pipe al anterior hijo
+            close(pipe_array[j][0]);
+            if(j > 0) { //Si no es el primer proceso que se ejecuta, cierra el extremo de escritura del pipe anterior
+                close(pipe_array[j-1][1]);
+            }
+
+            if (j == 0 && cmd->redirect_input) { // Redirigir entrada si es necesario y es el primer comando
+                input_redirect(cmd->redirect_input);
+            }
+            if (j == cmd->ncommands-1 && cmd->redirect_output) { // Redirigir salida si es necesario y es el último comando
+                output_redirect(cmd->redirect_output);
+            }
+
+            // Ejecutar el comando usando execvp
+            execvp(cmd->commands[0].argv[0], cmd->commands[0].argv);
+
+            // Si execvp falla, se notifica el error y se finaliza
+            fprintf(stderr, "%s: Comando no encontrado\n", cmd->commands[0].argv[0]);
+            exit(2);
+
+        }
+        else { //Soy el padre
+            waitpid(pid, NULL, 0); // Esperar a que termine el proceso hijo
+        }
+    }
+
+    for(int i = 0; i < cmd->ncommands - 1; i++) {
+        free(pipe_array[i]);
+    }
+    free(pipe_array);
+    free(pid_array);
 }
 
 // Redirigir la entrada desde un archivo

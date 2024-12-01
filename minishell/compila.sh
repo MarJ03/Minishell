@@ -1,2 +1,2 @@
 #!/bin/bash
-gcc -Wall -Wextra myshell.c libparser.a -o test -static
+gcc -Wall -Wextra minishell.c ./parser/libparser.a -o test -static
