@@ -5,6 +5,7 @@
 #include <fcntl.h>      // Operaciones con archivos
 #include <errno.h>      // Gestión de errores del sistema
 #include <sys/wait.h>   // Para manejar procesos hijos
+#include <sys/stat.h>  // Necesaria para la función umask
 #include "parser/parser.h" // Librería personalizada para analizar líneas de comandos
 
 #define MAX_PATH 1024 // Tamaño máximo del buffer para rutas
@@ -14,6 +15,7 @@ void process_command(tline *cmd);       // Procesar un comando y ejecutarlo
 void input_redirect(const char *file); // Configurar redirección de entrada
 void output_redirect(const char *file);// Configurar redirección de salida
 void run_cd(tline *cmd);               // Comando interno para cambiar directorio
+void run_umask(tline *cmd);            //    Comando interno umask
 void run_exit();                       // Comando interno para salir de la MiniShell
 
 int main() {
@@ -50,10 +52,7 @@ int main() {
     return 0;
 }
 
-// Procesar y ejecutar un comando
 void process_command(tline *cmd) {
-    pid_t pid;
-
     // Comprobar si es un comando interno (cd o exit)
     if (strcmp(cmd->commands[0].argv[0], "cd") == 0) {
         run_cd(cmd); // Cambiar directorio
@@ -66,71 +65,77 @@ void process_command(tline *cmd) {
     }
 
     if (strcmp(cmd->commands[0].argv[0], "umask") == 0) {
-        //run_umask(); // Salir de la MiniShell
+        run_umask(cmd); // Salir de la MiniShell
         return;
     }
 
-    //Si es un comando externo...
-    //Se crea el array de arrays de pipes (casillas = numero de comandos - 1)
-    int** pipe_array = (int**) malloc((cmd->ncommands - 1) * sizeof(int*));
-
-    //Se crea un array de 2 enteros por cada pipe
-    for(int i = 0; i < cmd->ncommands - 1; i++) {
-        pipe_array[i] = (int*)malloc(2*sizeof(int));
-        int info = pipe(pipe_array[i]);
-        if(info < 0) {
-            printf("Error creando la pipe %d",i);
+    // Si es un comando con pipes...
+    int **pipe_array = (int **)malloc((cmd->ncommands - 1) * sizeof(int *));
+    for (int i = 0; i < cmd->ncommands - 1; i++) {
+        pipe_array[i] = (int *)malloc(2 * sizeof(int));
+        if (pipe(pipe_array[i]) < 0) {
+            perror("Error creando la pipe");
+            exit(1);
         }
     }
 
-    //Se crea el array de pids (uno por cada proceso)
-    int* pid_array = (int*)malloc(cmd->ncommands * sizeof(int));
-
-    //Por cada comando que se tenga que ejecutar
-    for(int j=0; j<cmd->ncommands; j++) {
-
-        //A partir de aquí hay que distinguir entre código ejecutado por el padre y por el hijo
-        pid = fork();
-        if (pid < 0) { // Error en fork
+    for (int j = 0; j < cmd->ncommands; j++) {
+        const pid_t pid = fork();
+        if (pid < 0) {
             perror("Error al crear el proceso");
             exit(1);
         }
-        pid_array[j] = pid;
 
-        if(pid == 0) { //Soy el hijo
-
-            //Cada proceso hijo solo escribe en el pipe al siguiente hijo, pero solo lee en el pipe al anterior hijo
-            close(pipe_array[j][0]);
-            if(j > 0) { //Si no es el primer proceso que se ejecuta, cierra el extremo de escritura del pipe anterior
-                close(pipe_array[j-1][1]);
+        if (pid == 0) { // Proceso hijo
+            if (j > 0) {
+                // Si no es el primer comando, redirigir entrada desde la pipe anterior
+                dup2(pipe_array[j - 1][0], STDIN_FILENO);
             }
 
-            if (j == 0 && cmd->redirect_input) { // Redirigir entrada si es necesario y es el primer comando
+            if (j < cmd->ncommands - 1) {
+                // Si no es el último comando, redirigir salida hacia la siguiente pipe
+                dup2(pipe_array[j][1], STDOUT_FILENO);
+            }
+
+            // Si es el primer comando y se requiere redirigir la entrada
+            if (j == 0 && cmd->redirect_input) {
                 input_redirect(cmd->redirect_input);
             }
-            if (j == cmd->ncommands-1 && cmd->redirect_output) { // Redirigir salida si es necesario y es el último comando
+
+            // Si es el último comando y se requiere redirigir la salida
+            if (j == cmd->ncommands - 1 && cmd->redirect_output) {
                 output_redirect(cmd->redirect_output);
             }
 
-            // Ejecutar el comando usando execvp
-            execvp(cmd->commands[0].argv[0], cmd->commands[0].argv);
+            // Cerrar todas las pipes que no se estén utilizando
+            for (int i = 0; i < cmd->ncommands - 1; i++) {
+                close(pipe_array[i][0]);
+                close(pipe_array[i][1]);
+            }
 
-            // Si execvp falla, se notifica el error y se finaliza
-            fprintf(stderr, "%s: Comando no encontrado\n", cmd->commands[0].argv[0]);
-            exit(2);
+            // Ejecutar el comando
+            execvp(cmd->commands[j].argv[0], cmd->commands[j].argv);
 
-        }
-        else { //Soy el padre
-            waitpid(pid, NULL, 0); // Esperar a que termine el proceso hijo
+            // Si execvp falla
+            perror("Error al ejecutar el comando");
+            exit(1);
         }
     }
 
-    for(int i = 0; i < cmd->ncommands - 1; i++) {
+    // Cerrar todas las pipes en el padre
+    for (int i = 0; i < cmd->ncommands - 1; i++) {
+        close(pipe_array[i][0]);
+        close(pipe_array[i][1]);
         free(pipe_array[i]);
     }
     free(pipe_array);
-    free(pid_array);
+
+    // Esperar a que todos los hijos terminen
+    for (int j = 0; j < cmd->ncommands; j++) {
+        wait(NULL);
+    }
 }
+
 
 // Redirigir la entrada desde un archivo
 void input_redirect(const char *file) {
@@ -189,6 +194,42 @@ void run_cd(tline *cmd) {
         // Mostrar la ruta actual tras el cambio
         char current_dir[MAX_PATH];
         printf("Directorio actual: %s\n", getcwd(current_dir, sizeof(current_dir)));
+    }
+}
+
+//Implementacion del comando 'umask'
+void run_umask(tline *cmd) {
+    // Verificar si se proporcionó un argumento para umask
+    if (cmd->commands[0].argc == 1) {
+        // Si no se proporciona argumento, simplemente mostramos el valor actual de umask
+        mode_t current_umask = umask(0);  // Esto "lee" el umask actual y lo restablece
+        printf("Valor de máscara (umask) actual: %03o\n", current_umask);  // Muestra el valor en formato octal con 3 dígitos
+        umask(current_umask);  // Restablecer la máscara al valor original
+    } else {
+
+        // necesitamos fincadena para saber si la conversión a octal se completa, o por lo contrario, no lo hace, pudiendo
+        // quedar caracteres no válidos después del número. Ejemplo: 22b--> al apuntar a b, se dará cuenta de que la
+        //conversión no está bien hecha, y no pasará un valor no válido a umask. Se pasa como & porque strtol necesita
+        // modificar la cadena para la tranformación, aunque se quede a la mitad
+        char *fincadena;
+        // Si se proporciona un argumento, validamos que sea un valor octal válido
+        const char *umask_value_str = cmd->commands[0].argv[1];
+
+
+        // Convertir el valor a un número entero
+        long umask_value = strtol(umask_value_str, &fincadena, 8);  // Base 8 para octal
+
+        // Verificar si la conversión fue exitosa
+        if (*fincadena != '\0' || umask_value < 0 || umask_value > 0777) {
+            // Si no es un número octal válido, mostrar un mensaje de error
+            fprintf(stderr, "%s: Valor de umask inválido\n", umask_value_str);
+            return;
+        }
+
+        // Establecer la nueva umask
+        mode_t new_umask = (mode_t)umask_value;
+        umask(new_umask);  // Cambiar la máscara de umask
+        printf("Máscara (umask) cambiada a: %o\n", new_umask);  // Mostrar el nuevo valor en octal
     }
 }
 
