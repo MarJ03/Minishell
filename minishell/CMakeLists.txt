@@ -3,5 +3,4 @@ project(minishell C)
 
 set(CMAKE_C_STANDARD 23)
 
-add_executable(minishell minishell.c
-        parser/parser.h)
+add_executable(minishell minishell.c)

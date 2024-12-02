@@ -1,2 +1,2 @@
 #!/bin/bash
-gcc -Wall -Wextra minishell.c ./parser/libparser.a -o test -static
+gcc -o minishell minishell.c -L./parser -lparser -I./parser -no-pie

@@ -11,27 +11,28 @@
 #define MAX_PATH 1024 // Tamaño máximo del buffer para rutas
 
 // Declaración de funciones
-void process_command(tline *cmd);       // Procesar un comando y ejecutarlo
+void process_command(tline *cmd);      // Procesar un comando y ejecutarlo
 void input_redirect(const char *file); // Configurar redirección de entrada
 void output_redirect(const char *file);// Configurar redirección de salida
 void run_cd(tline *cmd);               // Comando interno para cambiar directorio
-void run_umask(tline *cmd);            //    Comando interno umask
+void run_umask(tline *cmd);            // Comando interno umask
 void run_exit();                       // Comando interno para salir de la MiniShell
+void prompt_handler();                 // Impresión del prompt de la Minishell
+void prompt_handler_2();               // Salida del comando sin impresión de prompt
 
 int main() {
     char input[1024];                  // Buffer para almacenar la entrada del usuario
     tline *parsed_line;                // Estructura para almacenar comandos analizados
-    char current_dir[MAX_PATH];        // Buffer para la ruta del directorio actual
+    int iterations = 0;                // Número de iteraciones de la minishell
+
+    signal(SIGINT, prompt_handler);    //Si llega la señal Ctrl+C ejecuta prompt_handler
+    signal(SIGTSTP, SIG_IGN);          //Si llega la señal Ctrl+Z la ignora
 
     while (1) { // Bucle infinito que mantiene viva la MiniShell
-        // Obtener el directorio actual y manejar errores
-        if (getcwd(current_dir, sizeof(current_dir)) == NULL) {
-            perror("Error al obtener el directorio actual");
-            exit(1);
-        }
 
-        // Mostrar el prompt con la ruta actual
-        printf("%s> ", current_dir);
+        if(iterations == 0) {
+            prompt_handler(); //Imprime el prompt
+        }
 
         // Leer la entrada del usuario
         if (!fgets(input, sizeof(input), stdin)) {
@@ -46,14 +47,14 @@ int main() {
 
         // Solo procesar un comando en esta implementación inicial
         process_command(parsed_line);
-
+        iterations++;
     }
 
     return 0;
 }
 
 void process_command(tline *cmd) {
-    // Comprobar si es un comando interno (cd o exit)
+    // Comprobar si es un comando interno (cd, exit o umask)
     if (strcmp(cmd->commands[0].argv[0], "cd") == 0) {
         run_cd(cmd); // Cambiar directorio
         return;
@@ -69,7 +70,7 @@ void process_command(tline *cmd) {
         return;
     }
 
-    // Si es un comando con pipes...
+    // Si es un comando externo
     int **pipe_array = (int **)malloc((cmd->ncommands - 1) * sizeof(int *));
     for (int i = 0; i < cmd->ncommands - 1; i++) {
         pipe_array[i] = (int *)malloc(2 * sizeof(int));
@@ -87,6 +88,12 @@ void process_command(tline *cmd) {
         }
 
         if (pid == 0) { // Proceso hijo
+
+            //Si es un proceso de background, ignora la señal Ctrl+C
+            if(cmd->background) {
+                signal(SIGINT, SIG_DFL); //Pendiente de probar cuando haya procesos en background
+            }
+
             if (j > 0) {
                 // Si no es el primer comando, redirigir entrada desde la pipe anterior
                 dup2(pipe_array[j - 1][0], STDIN_FILENO);
@@ -238,3 +245,21 @@ void run_exit() {
     printf("Saliendo de la MiniShell...\n");
     exit(0); // Terminar el programa
 }
+
+void prompt_handler() {
+    char current_dir[MAX_PATH];        // Buffer para la ruta del directorio actual
+    // Obtener el directorio actual y manejar errores
+    if (getcwd(current_dir, sizeof(current_dir)) == NULL) {
+        perror("Error al obtener el directorio actual");
+    }
+
+    // Mostrar el prompt con la ruta actual
+    printf("\n%s> ", current_dir);
+
+    fflush(stdout); //Limpia el buffer intermedio de la salida estándar
+}
+
+void prompt_handler_2() {
+    fflush(stdout); //Limpia el buffer intermedio de la salida estándar
+}
+
