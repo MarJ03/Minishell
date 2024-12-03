@@ -4,11 +4,14 @@
 #include <unistd.h>     // Funciones del sistema operativo
 #include <fcntl.h>      // Operaciones con archivos
 #include <errno.h>      // Gestión de errores del sistema
+#include <stdbool.h>
 #include <sys/wait.h>   // Para manejar procesos hijos
 #include <sys/stat.h>  // Necesaria para la función umask
 #include "parser/parser.h" // Librería personalizada para analizar líneas de comandos
 
 #define MAX_PATH 1024 // Tamaño máximo del buffer para rutas
+#define DEFAULT_JOBS 20 //Número máximo de comandos simultáneos en ejecución en la minishell
+#define INCREMENT 10 //Incremento del número de procesos máximo en caso necesario
 
 // Declaración de funciones
 void process_command(tline *cmd);      // Procesar un comando y ejecutarlo
@@ -18,21 +21,53 @@ void run_cd(tline *cmd);               // Comando interno para cambiar directori
 void run_umask(tline *cmd);            // Comando interno umask
 void run_exit();                       // Comando interno para salir de la MiniShell
 void prompt_handler();                 // Impresión del prompt de la Minishell
-void prompt_handler_2();               // Salida del comando sin impresión de prompt
+void check_childs();                   // Comprueba el estado de los procesos hijos en segundo plano
+void next_overwritable_job();           //Pendiente: Función para determinar el hueco en job_list del siguiente proceso a ejecutar
+
+
+// Definir un enum para los estados de un trabajo
+enum job_status {
+    RUNNING = 1,
+    STOPPED = 2,
+    FINISHED = 3,
+    ABORTED = 4
+};
+
+typedef struct job { //Cada elemento de tipo TJob se va a corresponder con una línea ejecutada
+    pid_t pid;
+    int job_id;
+    tline* command; //Habrá que construir el comando del usuario leyendo del campo commands
+    enum job_status status; //Estado del proceso
+    bool shown; //Indica si el comando ha sido mostrado o no. Por defecto será true, pero para los procesos de background será false (para mostrar que ya han acabado en jobs)
+} Tjob;
+
+
+Tjob* job_list; //Estructura para almacenar la información de los comandos dentro de la minishell
+int next_job = 0; //Siguiente posición libre de job_list
+int job_list_size = 0; //Tamaño de la lista de jobs
+
 
 int main() {
     char input[1024];                  // Buffer para almacenar la entrada del usuario
     tline *parsed_line;                // Estructura para almacenar comandos analizados
-    int iterations = 0;                // Número de iteraciones de la minishell
 
     signal(SIGINT, prompt_handler);    //Si llega la señal Ctrl+C ejecuta prompt_handler
     signal(SIGTSTP, SIG_IGN);          //Si llega la señal Ctrl+Z la ignora
 
+    prompt_handler(); //Imprime el prompt
+
+    job_list_size = DEFAULT_JOBS;
+    job_list = (Tjob*) malloc(job_list_size * sizeof(Tjob)); //Lista de comandos hijos (sin incluir a la propia minishell)
+
+    for(int i=0; i<DEFAULT_JOBS; i++) {
+        job_list[i].job_id = i+1;
+    }
+
     while (1) { // Bucle infinito que mantiene viva la MiniShell
 
-        if(iterations == 0) {
-            prompt_handler(); //Imprime el prompt
-        }
+        //REVISAR (dan segmentation error)
+        //check_childs(); //Comprueba si algún hijo en segundo plano ha terminado
+        //next_overwritable_job(); //Encuentra el hueco dentro de la lista de jobs
 
         // Leer la entrada del usuario
         if (!fgets(input, sizeof(input), stdin)) {
@@ -45,15 +80,26 @@ int main() {
             continue; // Ignorar líneas vacías
         }
 
+        /*
+        //Auxiliar
+        for(int i=0; i< parsed_line-> ncommands; i++) {
+            printf(parsed_line->commands[i].argv[0]);
+        }
+        */
+
+        //Añade la instrucción introducida por el usuario a job_list
+        job_list[next_job].command = parsed_line;
+
         // Solo procesar un comando en esta implementación inicial
         process_command(parsed_line);
-        iterations++;
+        prompt_handler();
     }
 
     return 0;
 }
 
 void process_command(tline *cmd) {
+
     // Comprobar si es un comando interno (cd, exit o umask)
     if (strcmp(cmd->commands[0].argv[0], "cd") == 0) {
         run_cd(cmd); // Cambiar directorio
@@ -90,7 +136,7 @@ void process_command(tline *cmd) {
         if (pid == 0) { // Proceso hijo
 
             //Si es un proceso de background, ignora la señal Ctrl+C
-            if(cmd->background) {
+            if(cmd->background == 1) {
                 signal(SIGINT, SIG_DFL); //Pendiente de probar cuando haya procesos en background
             }
 
@@ -127,6 +173,28 @@ void process_command(tline *cmd) {
             perror("Error al ejecutar el comando");
             exit(1);
         }
+
+        else { //Si es el padre, si queda espacio en la lista de jobs crea el proceso a partir del pid
+            if(next_job < DEFAULT_JOBS) {
+                job_list[next_job].status = RUNNING;
+                job_list[next_job].shown = false;
+            }
+            else {
+                job_list_size += INCREMENT;
+                Tjob *temp = (Tjob*)realloc(job_list, job_list_size * sizeof(Tjob));
+                if(temp == NULL) { //Si la reasignación de memoria falla la lista de jobs no se crea (se reintentará en el siguiente comando)
+                    perror("Error en reasignación de memoria: ");
+                }
+                else {
+                    job_list = temp;
+                }
+            }
+
+            //Si es el último comando de la instrucción (es decir, el último interconectado por pipes) incrementa next_job
+            if(j == cmd->ncommands) {
+                next_job++;
+            }
+        }
     }
 
     // Cerrar todas las pipes en el padre
@@ -139,7 +207,9 @@ void process_command(tline *cmd) {
 
     // Esperar a que todos los hijos terminen
     for (int j = 0; j < cmd->ncommands; j++) {
-        wait(NULL);
+        if(cmd->background == 0) { //Únicamente espera por los hijos que son procesos en foreground
+            wait(NULL);
+        }
     }
 }
 
@@ -259,7 +329,41 @@ void prompt_handler() {
     fflush(stdout); //Limpia el buffer intermedio de la salida estándar
 }
 
-void prompt_handler_2() {
-    fflush(stdout); //Limpia el buffer intermedio de la salida estándar
+void check_childs() {
+    int exit_status;
+    for(int i=0; i<job_list_size; i++) { //Por cada proceso que contenga job_list
+        if(job_list[i].command->background) {
+            pid_t pid = waitpid(job_list[i].pid, &exit_status, WNOHANG);
+
+            if(pid > 0) {
+                //Si el proceso ha terminado normalmente, actualiza su estado
+                if(WIFEXITED(exit_status)) {
+                    job_list[i].status = FINISHED;
+                    job_list[i].shown = false;
+                }
+                //Si ha terminado repentinamente y por otras razones
+                else if(WIFSIGNALED(exit_status)) {
+                    job_list[i].status = ABORTED;
+                    job_list[i].shown = false;
+                }
+            }
+
+            else if(pid < 0) {
+                perror("Error al comprobar estado de hijos: ");
+            }
+
+        }
+    }
 }
 
+void next_overwritable_job() {
+    bool changed = 0; //Indica si se ha cambiado next_job
+    for(int i=0; i<job_list_size; i++) { //Por cada proceso que contenga job_list
+        if((job_list[i].command->background == 0) || (job_list[i].command-> background && job_list->shown && true)) {
+            next_job = i;
+            changed = true;
+        }
+
+        if (changed) break;
+    }
+}
