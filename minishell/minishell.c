@@ -58,6 +58,17 @@ int main() {
 
     job_list_size = DEFAULT_JOBS;
     job_list = (Tjob*) malloc(job_list_size * sizeof(Tjob)); //Lista de comandos hijos (sin incluir a la propia minishell)
+    if (job_list == NULL) {
+        perror("Error al asignar memoria para job_list");
+        exit(1);
+    }
+    for (int i = 0; i < job_list_size; i++) {
+        job_list[i].pid = -1;        // Inicializar PID a un valor inválido
+        job_list[i].command = NULL;  // Inicializar puntero a NULL
+        job_list[i].status = 0;      // Inicializar estado
+        job_list[i].shown = true;    // Inicializar a true
+    }
+
 
     for(int i=0; i<DEFAULT_JOBS; i++) {
         job_list[i].job_id = i+1;
@@ -66,8 +77,8 @@ int main() {
     while (1) { // Bucle infinito que mantiene viva la MiniShell
 
         //REVISAR (dan segmentation error)
-        //check_childs(); //Comprueba si algún hijo en segundo plano ha terminado
-        //next_overwritable_job(); //Encuentra el hueco dentro de la lista de jobs
+        check_childs(); //Comprueba si algún hijo en segundo plano ha terminado
+        next_overwritable_job(); //Encuentra el hueco dentro de la lista de jobs
 
         // Leer la entrada del usuario
         if (!fgets(input, sizeof(input), stdin)) {
@@ -332,24 +343,33 @@ void prompt_handler() {
 void check_childs() {
     int exit_status;
     for(int i=0; i<job_list_size; i++) { //Por cada proceso que contenga job_list
+        if (job_list[i].command == NULL) {
+            continue; // Saltar si el comando no está inicializado
+        }
         if(job_list[i].command->background) {
+            if (job_list[i].pid <= 0) {
+                continue; // Saltar si el PID no es válido
+            }
+
             pid_t pid = waitpid(job_list[i].pid, &exit_status, WNOHANG);
 
-            if(pid > 0) {
-                //Si el proceso ha terminado normalmente, actualiza su estado
-                if(WIFEXITED(exit_status)) {
+
+            if (pid > 0) {
+                // Proceso terminado normalmente
+                if (WIFEXITED(exit_status)) {
                     job_list[i].status = FINISHED;
                     job_list[i].shown = false;
-                }
-                //Si ha terminado repentinamente y por otras razones
-                else if(WIFSIGNALED(exit_status)) {
+                } else if (WIFSIGNALED(exit_status)) {
                     job_list[i].status = ABORTED;
                     job_list[i].shown = false;
                 }
-            }
-
-            else if(pid < 0) {
-                perror("Error al comprobar estado de hijos: ");
+            } else if (pid == 0) {
+                // Proceso aún no ha terminado
+                continue;
+            } else {
+                if (errno != ECHILD) { // Ignorar ECHILD, que indica que no hay hijos para este PID
+                    perror("Error al comprobar estado de hijos");
+                }
             }
 
         }
@@ -357,13 +377,22 @@ void check_childs() {
 }
 
 void next_overwritable_job() {
-    bool changed = 0; //Indica si se ha cambiado next_job
-    for(int i=0; i<job_list_size; i++) { //Por cada proceso que contenga job_list
-        if((job_list[i].command->background == 0) || (job_list[i].command-> background && job_list->shown && true)) {
+    next_job = -1;
+    bool changed = false;
+
+    for (int i = 0; i < job_list_size; i++) {
+        if (job_list[i].command == NULL) {
+            continue; // Saltar si no hay un comando válido
+        }
+        if ((job_list[i].command->background == 0) || (job_list[i].command->background && job_list[i].shown)) {
             next_job = i;
             changed = true;
+            break;
         }
-
-        if (changed) break;
     }
+
+    if (!changed) {
+        fprintf(stderr, "No se encontró un trabajo sobreescribible.\n");
+    }
+
 }
