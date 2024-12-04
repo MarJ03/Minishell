@@ -41,6 +41,7 @@ typedef struct job { //Cada elemento de tipo TJob se va a corresponder con una l
 } Tjob;
 
 
+
 Tjob* job_list; //Estructura para almacenar la información de los comandos dentro de la minishell
 int next_job = 0; //Siguiente posición libre de job_list
 int job_list_size = 0; //Tamaño de la lista de jobs
@@ -56,6 +57,12 @@ int main() {
     prompt_handler(); //Imprime el prompt
 
     job_list = (Tjob*) malloc(MAX_JOBS * sizeof(Tjob)); //Lista de comandos hijos (sin incluir a la propia minishell)
+    for (int i = 0; i < MAX_JOBS; i++) {
+        job_list[i].command = NULL;      // No hay comandos asignados al inicio
+        job_list[i].status = FINISHED;  // Considerar todos los huecos como terminados inicialmente
+        job_list[i].shown = true;       // Por defecto, mostrados
+        job_list[i].pid = -1;           // Indicador de proceso inexistente
+    }
 
     for(int i=0; i<MAX_JOBS; i++) {
         job_list[i].job_id = i+1;
@@ -64,8 +71,8 @@ int main() {
     while (1) { // Bucle infinito que mantiene viva la MiniShell
 
         //REVISAR (dan segmentation error)
-        //check_childs(); //Comprueba si algún hijo en segundo plano ha terminado
-        //next_overwritable_job(); //Encuentra el hueco dentro de la lista de jobs
+        check_childs(); //Comprueba si algún hijo en segundo plano ha terminado
+        next_overwritable_job(); //Encuentra el hueco dentro de la lista de jobs
 
         // Leer la entrada del usuario
         if (!fgets(input, sizeof(input), stdin)) {
@@ -307,39 +314,36 @@ void prompt_handler() {
 
 void check_childs() {
     int exit_status;
-    for(int i=0; i<job_list_size; i++) { //Por cada proceso que contenga job_list
-        if(job_list[i].command->background) {
+    for (int i = 0; i < MAX_JOBS; i++) {
+        if (job_list[i].command != NULL && job_list[i].command->background) {
             pid_t pid = waitpid(job_list[i].pid, &exit_status, WNOHANG);
 
-            if(pid > 0) {
-                //Si el proceso ha terminado normalmente, actualiza su estado
-                if(WIFEXITED(exit_status)) {
-                    job_list[i].status = FINISHED;
-                    job_list[i].shown = false;
+            if (pid > 0) {
+                if (WIFEXITED(exit_status) || WIFSIGNALED(exit_status)) {
+                    job_list[i].status = FINISHED; // Marcar como terminado
+                    job_list[i].shown = false;    // Mostrar el estado terminado
+                    free(job_list[i].command);   // Liberar memoria si se asignó dinámicamente
+                    job_list[i].command = NULL;  // Marcar el hueco como vacío
                 }
-                //Si ha terminado repentinamente y por otras razones
-                else if(WIFSIGNALED(exit_status)) {
-                    job_list[i].status = ABORTED;
-                    job_list[i].shown = false;
-                }
+            } else if (pid < 0) {
+                perror("Error al comprobar estado de hijos");
             }
-
-            else if(pid < 0) {
-                perror("Error al comprobar estado de hijos: ");
-            }
-
         }
     }
 }
 
 void next_overwritable_job() {
-    bool changed = 0; //Indica si se ha cambiado next_job
-    for(int i=0; i<MAX_JOBS; i++) { //Por cada proceso que contenga job_list
-        if((job_list[i].command->background == 0) || (job_list[i].command-> background && job_list->shown == true)) {
+    for (int i = 0; i < MAX_JOBS; i++) {
+        // Si el hueco está vacío o es un proceso en background mostrado, es válido
+        if (job_list[i].command == NULL ||
+            (job_list[i].command->background && job_list[i].shown)) {
             next_job = i;
-            changed = true;
-        }
-
-        if (changed) break;
+            return; // Salir tras encontrar el primer hueco válido
+            }
     }
+
+    // Si no se encontró un hueco válido, manejar el error
+    fprintf(stderr, "Error: No se encontró un hueco válido en job_list\n");
+
+
 }
