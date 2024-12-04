@@ -233,6 +233,9 @@ void output_redirect(const char *file) {
 
 // Implementación del comando 'cd'
 void run_cd(tline *cmd) {
+    static char prev_dir[MAX_PATH] = ""; // Almacena el directorio anterior
+    char current_dir[MAX_PATH];         // Buffer para el directorio actual
+
     const char *directory = NULL;
 
     // Si no se proporcionan argumentos, usar la variable HOME
@@ -242,20 +245,53 @@ void run_cd(tline *cmd) {
             fprintf(stderr, "Error: No se encontró la variable HOME\n");
             return;
         }
+    } else if (strcmp(cmd->commands[0].argv[1], "-") == 0) {
+        // Si el argumento es "-", cambiar al directorio anterior
+        if (strlen(prev_dir) == 0) {
+            fprintf(stderr, "Error: No hay un directorio anterior para cambiar\n");
+            return;
+        }
+        directory = prev_dir;
+    } else if (cmd->commands[0].argv[1][0] == '~') {
+        // Expande el tilde (~) a HOME
+        const char *home = getenv("HOME");
+        if (home == NULL) {
+            fprintf(stderr, "Error: No se encontró la variable HOME\n");
+            return;
+        }
+
+        // Concatenar HOME con la ruta relativa después de '~'
+        static char expanded_path[MAX_PATH];
+        snprintf(expanded_path, sizeof(expanded_path), "%s%s", home, cmd->commands[0].argv[1] + 1);
+        directory = expanded_path;
     } else {
-        // Usar el primer argumento como ruta de destino
+        // Usar el argumento proporcionado como ruta
         directory = cmd->commands[0].argv[1];
     }
 
-    // Cambiar el directorio actual
-    if (chdir(directory) != 0) { // Manejar errores en chdir
-        fprintf(stderr, "Error al cambiar de directorio: %s\n", strerror(errno));
+    // Guardar el directorio actual antes de cambiar
+    if (getcwd(current_dir, sizeof(current_dir)) == NULL) {
+        perror("Error al obtener el directorio actual");
+        return;
+    }
+
+    // Intentar cambiar el directorio
+    if (chdir(directory) != 0) {
+        fprintf(stderr, "Error al cambiar a '%s': %s\n", directory, strerror(errno));
     } else {
-        // Mostrar la ruta actual tras el cambio
-        char current_dir[MAX_PATH];
-        printf("Directorio actual: %s\n", getcwd(current_dir, sizeof(current_dir)));
+        // Guardar el directorio anterior para el próximo "cd -"
+        strncpy(prev_dir, current_dir, sizeof(prev_dir) - 1);
+        prev_dir[sizeof(prev_dir) - 1] = '\0';
+
+        // Mostrar el nuevo directorio actual
+        if (getcwd(current_dir, sizeof(current_dir)) == NULL) {
+            perror("Error al obtener el directorio actual después de cambiar");
+        } else {
+            printf("Directorio actual: %s\n", current_dir);
+        }
     }
 }
+
 
 //Implementacion del comando 'umask'
 void run_umask(tline *cmd) {
