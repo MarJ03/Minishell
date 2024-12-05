@@ -71,8 +71,8 @@ int main() {
     while (1) { // Bucle infinito que mantiene viva la MiniShell
 
         //REVISAR (dan segmentation error)
-        check_childs(); //Comprueba si algún hijo en segundo plano ha terminado
-        next_overwritable_job(); //Encuentra el hueco dentro de la lista de jobs
+        //check_childs(); //Comprueba si algún hijo en segundo plano ha terminado
+        //next_overwritable_job(); //Encuentra el hueco dentro de la lista de jobs
 
         // Leer la entrada del usuario
         if (!fgets(input, sizeof(input), stdin)) {
@@ -81,22 +81,14 @@ int main() {
 
         // Parsear la línea introducida
         parsed_line = tokenize(input);
-        if (parsed_line == NULL || parsed_line->ncommands == 0) {
-            continue; // Ignorar líneas vacías
+        if (parsed_line != NULL && parsed_line->ncommands > 0) {
+            //Añade la instrucción introducida por el usuario a job_list
+            job_list[next_job].command = parsed_line;
+
+            // Solo procesar un comando en esta implementación inicial
+            process_command(parsed_line);
         }
 
-        /*
-        //Auxiliar
-        for(int i=0; i< parsed_line-> ncommands; i++) {
-            printf(parsed_line->commands[i].argv[0]);
-        }
-        */
-
-        //Añade la instrucción introducida por el usuario a job_list
-        job_list[next_job].command = parsed_line;
-
-        // Solo procesar un comando en esta implementación inicial
-        process_command(parsed_line);
         prompt_handler();
     }
 
@@ -122,12 +114,17 @@ void process_command(tline *cmd) {
     }
 
     // Si es un comando externo
-    int **pipe_array = (int **)malloc((cmd->ncommands - 1) * sizeof(int *));
-    for (int i = 0; i < cmd->ncommands - 1; i++) {
-        pipe_array[i] = (int *)malloc(2 * sizeof(int));
-        if (pipe(pipe_array[i]) < 0) {
-            perror("Error creando la pipe");
-            exit(1);
+
+    int **pipe_array = NULL;
+    //Crea el array de pipes
+    if(cmd->ncommands > 1) {
+        pipe_array = (int **)malloc((cmd->ncommands - 1) * sizeof(int *));
+        for (int i = 0; i < cmd->ncommands - 1; i++) {
+            pipe_array[i] = (int *)malloc(2 * sizeof(int));
+            if (pipe(pipe_array[i]) < 0) {
+                perror("Error creando la pipe");
+                exit(1);
+            }
         }
     }
 
@@ -140,35 +137,41 @@ void process_command(tline *cmd) {
 
         if (pid == 0) { // Proceso hijo
 
+            printf("Hijo");
+            //Modificación de comportamiento de señales
             //Si es un proceso de background, ignora la señal Ctrl+C
             if(cmd->background == 1) {
                 signal(SIGINT, SIG_DFL); //Pendiente de probar cuando haya procesos en background
             }
 
-            if (j > 0) {
-                // Si no es el primer comando, redirigir entrada desde la pipe anterior
-                dup2(pipe_array[j - 1][0], STDIN_FILENO);
-            }
+            if(cmd->ncommands > 1) {
+                //Redirecciones intermedias de pipes
+                // Todos los comandos menos el último tienen que redirigir su salida hacia el siguiente pipe
+                if (j < cmd->ncommands - 1) {
+                    dup2(pipe_array[j][1], STDOUT_FILENO);
+                }
 
-            if (j < cmd->ncommands - 1) {
-                // Si no es el último comando, redirigir salida hacia la siguiente pipe
-                dup2(pipe_array[j][1], STDOUT_FILENO);
-            }
+                // Todos los comandos menos el último tienen que redirigir su salida hacia el pipe anterior
+                if (j > 0) {
+                    dup2(pipe_array[j - 1][0], STDIN_FILENO);
+                }
 
-            // Si es el primer comando y se requiere redirigir la entrada
-            if (j == 0 && cmd->redirect_input) {
-                input_redirect(cmd->redirect_input);
-            }
+                //Redirecciones de entrada y salida del primer y último mandato de la línea
+                // Si es el primer comando y se requiere redirigir la entrada
+                if (j == 0 && cmd->redirect_input) {
+                    input_redirect(cmd->redirect_input);
+                }
 
-            // Si es el último comando y se requiere redirigir la salida
-            if (j == cmd->ncommands - 1 && cmd->redirect_output) {
-                output_redirect(cmd->redirect_output);
-            }
+                // Si es el último comando y se requiere redirigir la salida
+                if (j == cmd->ncommands - 1 && cmd->redirect_output) {
+                    output_redirect(cmd->redirect_output);
+                }
 
-            // Cerrar todas las pipes que no se estén utilizando
-            for (int i = 0; i < cmd->ncommands - 1; i++) {
-                close(pipe_array[i][0]);
-                close(pipe_array[i][1]);
+                // Cerrar todas las pipes que no se estén utilizando
+                for (int i = 0; i < cmd->ncommands - 1; i++) { // Es < ncommands -1 porque hay un pipe menos que el número de comandos y además el for empieza en 0
+                    close(pipe_array[i][0]);
+                    close(pipe_array[i][1]);
+                }
             }
 
             // Ejecutar el comando
@@ -181,12 +184,15 @@ void process_command(tline *cmd) {
     }
 
     // Cerrar todas las pipes en el padre
-    for (int i = 0; i < cmd->ncommands - 1; i++) {
-        close(pipe_array[i][0]);
-        close(pipe_array[i][1]);
-        free(pipe_array[i]);
+    if(pipe_array != NULL) {
+        for (int i = 0; i < cmd->ncommands - 1; i++) {
+            close(pipe_array[i][0]);
+            close(pipe_array[i][1]);
+            free(pipe_array[i]);
+        }
+        free(pipe_array);
     }
-    free(pipe_array);
+
 
     // Esperar a que todos los hijos terminen
     for (int j = 0; j < cmd->ncommands; j++) {
@@ -380,6 +386,5 @@ void next_overwritable_job() {
 
     // Si no se encontró un hueco válido, manejar el error
     fprintf(stderr, "Error: No se encontró un hueco válido en job_list\n");
-
 
 }
