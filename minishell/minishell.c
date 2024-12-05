@@ -20,8 +20,8 @@ void run_cd(tline *cmd);               // Comando interno para cambiar directori
 void run_umask(tline *cmd);            // Comando interno umask
 void run_exit();                       // Comando interno para salir de la MiniShell
 void prompt_handler();                 // Impresión del prompt de la Minishell
-void check_childs();                   // Comprueba el estado de los procesos hijos en segundo plano
-void next_overwritable_job();           //Pendiente: Función para determinar el hueco en job_list del siguiente proceso a ejecutar
+void check_jobs();                      // Comprueba si todos los procesos que componen un job han terminado
+void next_overwritable_job();          // Pendiente: Función para determinar el hueco en job_list del siguiente proceso a ejecutar
 
 
 // Definir un enum para los estados de un trabajo
@@ -33,7 +33,7 @@ enum job_status {
 };
 
 typedef struct job { //Cada elemento de tipo TJob se va a corresponder con una línea ejecutada
-    pid_t pid;
+    pid_t* pid_array;
     int job_id;
     tline* command; //Habrá que construir el comando del usuario leyendo del campo commands
     enum job_status status; //Estado del proceso
@@ -57,12 +57,6 @@ int main() {
     prompt_handler(); //Imprime el prompt
 
     job_list = (Tjob*) malloc(MAX_JOBS * sizeof(Tjob)); //Lista de comandos hijos (sin incluir a la propia minishell)
-    for (int i = 0; i < MAX_JOBS; i++) {
-        job_list[i].command = NULL;      // No hay comandos asignados al inicio
-        job_list[i].status = FINISHED;  // Considerar todos los huecos como terminados inicialmente
-        job_list[i].shown = true;       // Por defecto, mostrados
-        job_list[i].pid = -1;           // Indicador de proceso inexistente
-    }
 
     for(int i=0; i<MAX_JOBS; i++) {
         job_list[i].job_id = i+1;
@@ -71,8 +65,8 @@ int main() {
     while (1) { // Bucle infinito que mantiene viva la MiniShell
 
         //REVISAR (dan segmentation error)
-        //check_childs(); //Comprueba si algún hijo en segundo plano ha terminado
-        //next_overwritable_job(); //Encuentra el hueco dentro de la lista de jobs
+        //check_jobs(); //Comprueba si algún hijo en segundo plano ha terminado
+        next_overwritable_job(); //Encuentra el hueco dentro de la lista de jobs
 
         // Leer la entrada del usuario
         if (!fgets(input, sizeof(input), stdin)) {
@@ -354,21 +348,51 @@ void prompt_handler() {
     fflush(stdout); //Limpia el buffer intermedio de la salida estándar
 }
 
-void check_childs() {
-    int exit_status;
-    for (int i = 0; i < MAX_JOBS; i++) {
-        if (job_list[i].command != NULL && job_list[i].command->background) {
-            pid_t pid = waitpid(job_list[i].pid, &exit_status, WNOHANG);
+void check_jobs() {
+    int i,j,k;
+    int job_id_counter = 1;
 
-            if (pid > 0) {
-                if (WIFEXITED(exit_status) || WIFSIGNALED(exit_status)) {
-                    job_list[i].status = FINISHED; // Marcar como terminado
-                    job_list[i].shown = false;    // Mostrar el estado terminado
-                    free(job_list[i].command);   // Liberar memoria si se asignó dinámicamente
-                    job_list[i].command = NULL;  // Marcar el hueco como vacío
-                }
-            } else if (pid < 0) {
-                perror("Error al comprobar estado de hijos");
+    //Para mostrar el job_id en orden de colocación dentro de job_list, se recolocan los ids en función del contenido actual de job_list
+    for(i=0; i<MAX_JOBS; i++){
+        if(job_list[i].shown == false){
+            job_list[i].job_id = job_id_counter;
+            job_id_counter++;
+        }
+    }
+
+    //Comprueba para cada uno de los jobs si han terminado, y actualiza su estado dentro de job_list
+    for(i=0; i<MAX_JOBS; i++){
+        Tjob job = job_list[i];
+        int exit_status;
+        pid_t current_job_pids[job.command->ncommands];
+
+        for(j=0; j<job.command->ncommands; j++){
+            pid_t pid = waitpid(job_list[i].pid_array[j], &exit_status, WNOHANG);
+
+            if(pid < 0){
+                perror("waitpid");
+                exit(1); //Sale de la minishell si hay algún error con los pids
+            }
+
+            current_job_pids[j] = pid;
+        }
+
+        bool all_finished = true;
+        for(k=0; k<job.command->ncommands; k++){
+            if(current_job_pids[k] == 0){
+                all_finished = false;
+                break;
+            }
+        }
+
+        if(all_finished){
+            if (WIFEXITED(exit_status)){
+                job_list[i].status = FINISHED; // Marcar como terminado
+                job_list[i].shown = false;    // Y marcar como todavía no mostrado
+            }
+            else if (WIFSIGNALED(exit_status)) {
+                job_list[i].status = ABORTED; // Marcar como abortado
+                job_list[i].shown = false;    // Y marcar como todavía no mostrado
             }
         }
     }
