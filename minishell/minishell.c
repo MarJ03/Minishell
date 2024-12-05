@@ -58,6 +58,13 @@ int main() {
 
     job_list = (Tjob*) malloc(MAX_JOBS * sizeof(Tjob)); //Lista de comandos hijos (sin incluir a la propia minishell)
 
+    for (int i = 0; i < MAX_JOBS; i++) {
+        job_list[i].command = NULL;      // No hay comandos asignados al inicio
+        job_list[i].status = FINISHED;  // Considerar todos los huecos como terminados inicialmente
+        job_list[i].shown = true;       // Por defecto, mostrados
+        job_list[i].pid_array = NULL;           // Indicador de proceso inexistente
+    }
+
     for(int i=0; i<MAX_JOBS; i++) {
         job_list[i].job_id = i+1;
     }
