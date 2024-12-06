@@ -11,6 +11,7 @@
 
 #define MAX_PATH 1024 // Tamaño máximo del buffer para rutas
 #define MAX_JOBS 20 //Número máximo de comandos simultáneos en ejecución en la minishell
+#define MAX_LINE_LENGTH 1024
 
 // Declaración de funciones
 void process_command(tline *cmd);      // Procesar un comando y ejecutarlo
@@ -33,9 +34,10 @@ enum job_status {
 };
 
 typedef struct job { //Cada elemento de tipo TJob se va a corresponder con una línea ejecutada
+    int ncommands;
     pid_t* pid_array;
     int job_id;
-    tline* command; //Habrá que construir el comando del usuario leyendo del campo commands
+    char* command; //Habrá que construir el comando del usuario leyendo del campo commands
     enum job_status status; //Estado del proceso
     bool shown; //Indica si el comando ha sido mostrado o no. Por defecto será true, pero para los procesos de background será false (para mostrar que ya han acabado en jobs)
 } Tjob;
@@ -44,12 +46,12 @@ typedef struct job { //Cada elemento de tipo TJob se va a corresponder con una l
 
 Tjob* job_list; //Estructura para almacenar la información de los comandos dentro de la minishell
 int next_job = 0; //Siguiente posición libre de job_list
-int job_list_size = 0; //Tamaño de la lista de jobs
+int last_job = -1; //Posición del último job almacenado
+tline *parsed_line; // Estructura para almacenar comandos analizados
 
 
 int main() {
     char input[1024];                  // Buffer para almacenar la entrada del usuario
-    tline *parsed_line;                // Estructura para almacenar comandos analizados
 
     signal(SIGINT, prompt_handler);    //Si llega la señal Ctrl+C ejecuta prompt_handler
     signal(SIGTSTP, SIG_IGN);          //Si llega la señal Ctrl+Z la ignora
@@ -59,7 +61,8 @@ int main() {
     job_list = (Tjob*) malloc(MAX_JOBS * sizeof(Tjob)); //Lista de comandos hijos (sin incluir a la propia minishell)
 
     for (int i = 0; i < MAX_JOBS; i++) {
-        job_list[i].command = NULL;      // No hay comandos asignados al inicio
+        job_list[i].ncommands = 0;
+        job_list[i].command = (char*)malloc(MAX_LINE_LENGTH * sizeof(char)); //Texto vacío en el que irá la línea introducida
         job_list[i].status = FINISHED;  // Considerar todos los huecos como terminados inicialmente
         job_list[i].shown = true;       // Por defecto, mostrados
         job_list[i].pid_array = NULL;           // Indicador de proceso inexistente
@@ -70,7 +73,7 @@ int main() {
     }
 
     while (1) { // Bucle infinito que mantiene viva la MiniShell
-        check_jobs();
+        //check_jobs();
         next_overwritable_job(); //Encuentra el hueco dentro de la lista de jobs
 
         // Leer la entrada del usuario
@@ -81,11 +84,25 @@ int main() {
         // Parsear la línea introducida
         parsed_line = tokenize(input);
         if (parsed_line != NULL && parsed_line->ncommands > 0) {
+            //Crea la línea introducida a partir del tline
+            if(parsed_line->background) {
+                for (int j = 0; j < parsed_line->ncommands; j++) {
+                    if (parsed_line->commands[j].argv != NULL) {
+                        for (int k = 0; k < parsed_line->commands[j].argc; k++) {
+                            strcat(job_list[next_job].command, parsed_line->commands[j].argv[k]);
+                            strcat(job_list[next_job].command, " ");
+                        }
+                    }
+                    if (j < parsed_line->ncommands - 1) {
+                        strcat(job_list[next_job].command,"| ");
+                    }
+                }
 
-            if(parsed_line->background == 1) {
-                printf("Background command");
-                //Añade la instrucción introducida por el usuario a job_list
-                job_list[next_job].command = parsed_line;
+                strcat(job_list[next_job].command, "&");
+                job_list[next_job].ncommands = parsed_line->ncommands;
+                job_list[next_job].status = RUNNING;
+                job_list[next_job].shown = false;
+                job_list[next_job].pid_array = (pid_t*)malloc(parsed_line->ncommands * sizeof(pid_t));
             }
 
             // Solo procesar un comando en esta implementación inicial
@@ -93,6 +110,7 @@ int main() {
         }
 
         prompt_handler();
+        last_job = next_job;
     }
 
     return 0;
@@ -116,6 +134,29 @@ void process_command(tline *cmd) {
         return;
     }
 
+    if (strcmp(cmd->commands[0].argv[0], "jobs") == 0) {
+        for (int i = 0; i < MAX_JOBS; i++) {
+            char* job_status = "";
+            switch(job_list[i].status) {
+                case RUNNING:
+                    job_status = "Running";
+                break;
+                case STOPPED:
+                    job_status = "Stopped";
+                break;
+                case FINISHED:
+                    job_status = "Done";
+                break;
+                case ABORTED:
+                    job_status = "Aborted";
+                break;
+            }
+
+            printf("[%d]   %s              %s ", job_list[i].job_id, job_status, job_list[i].command);
+            printf("\n");
+        }
+    }
+
     //Opción extra para mostrar el contenido de job_list
     if (strcmp(cmd->commands[0].argv[0], "debug") == 0) {
         for (int i = 0; i < MAX_JOBS; i++) {
@@ -135,30 +176,20 @@ void process_command(tline *cmd) {
                     break;
             }
 
-            printf("Job ID: %d | Status: %s | Shown: %s | Command: ", job_list[i].job_id, job_status, job_list[i].shown ? "true" : "false");
-
-            // Mostrar el comando del usuario desde tline (suponiendo que tiene un campo commands)
-            if (job_list[i].command != NULL && job_list[i].command->commands != NULL) {
-                for (int j = 0; j < job_list[i].command->ncommands; j++) {
-                    if (job_list[i].command->commands[j].argv != NULL) {
-                        for (int k = 0; k < job_list[i].command->commands[j].argc; k++) {
-                            printf(" %s ", job_list[i].command->commands[j].argv[k]);
-                        }
-                    }
-                    if (j < job_list[i].command->ncommands - 1) {
-                        printf("|");
-                    }
+            printf("PIDs: [");
+            if(job_list->pid_array != NULL) {
+                for (int p = 0; p < job_list[i].ncommands; p++) {
+                    printf(" %d ", job_list[i].pid_array[p]);
                 }
-            } else {
-                printf("(No command)");
             }
+            printf("] | ");
+
+            printf("Job ID: %d | Status: %s | Shown: %s | Command: %s", job_list[i].job_id, job_status, job_list[i].shown ? "true" : "false", job_list[i].command);
             printf("\n");
         }
-        return;
     }
 
     // Si es un comando externo
-
     int **pipe_array = NULL;
     //Crea el array de pipes
     if(cmd->ncommands > 1) {
@@ -181,7 +212,6 @@ void process_command(tline *cmd) {
 
         if (pid == 0) { // Proceso hijo
 
-            printf("Hijo");
             //Modificación de comportamiento de señales
             //Si es un proceso de background, ignora la señal Ctrl+C
             if(cmd->background == 1) {
@@ -224,6 +254,12 @@ void process_command(tline *cmd) {
             // Si execvp falla
             perror("Error al ejecutar el comando");
             exit(1);
+        }
+
+        else { //Si es el padre
+            if(cmd->background) {
+                job_list[next_job].pid_array[j] = pid;
+            }
         }
     }
 
@@ -416,9 +452,9 @@ void check_jobs() {
         if(job_list[i].command != NULL && job_list[i].pid_array != NULL) {
             Tjob job = job_list[i];
             int exit_status;
-            pid_t current_job_pids[job.command->ncommands];
+            pid_t current_job_pids[job.ncommands];
 
-            for(j=0; j<job.command->ncommands; j++){
+            for(j=0; j<job.ncommands; j++){
                 pid_t pid = waitpid(job_list[i].pid_array[j], &exit_status, WNOHANG);
 
                 if(pid < 0){
@@ -430,7 +466,7 @@ void check_jobs() {
             }
 
             bool all_finished = true;
-            for(k=0; k<job.command->ncommands; k++){
+            for(k=0; k<job.ncommands; k++){
                 if(current_job_pids[k] == 0){
                     all_finished = false;
                     break;
@@ -454,13 +490,13 @@ void check_jobs() {
 void next_overwritable_job() {
     for (int i = 0; i < MAX_JOBS; i++) {
         // Si el hueco está vacío o es un proceso en background mostrado, es válido
-        if (job_list[i].command == NULL || (job_list[i].command->background && job_list[i].shown)) {
+        if (job_list[i].shown) {
             next_job = i;
             return; // Salir tras encontrar el primer hueco válido
-            }
+        }
     }
 
     // Si no se encontró un hueco válido, manejar el error
     fprintf(stderr, "Error: No se encontró un hueco válido en job_list\n");
-
 }
+

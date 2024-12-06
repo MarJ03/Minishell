@@ -25,7 +25,7 @@ main(void) {
 			printf("redirección de error: %s\n", line->redirect_error);
 		}
 		if (line->background) {
-			printf("comando a ejecutarse en background\n");
+			printf("comando a ejecutarse en background: %d\n", line->background);
 		} 
 		for (i=0; i<line->ncommands; i++) {
 			printf("orden %d (%s):\n", i, line->commands[i].filename);
