@@ -27,10 +27,10 @@ void next_overwritable_job();          // Pendiente: Función para determinar el
 
 // Definir un enum para los estados de un trabajo
 enum job_status {
-    RUNNING = 1,
-    STOPPED = 2,
-    FINISHED = 3,
-    ABORTED = 4
+    RUNNING = 1,  //En ejecución
+    SUSPENDED = 2,  //Suspendido
+    FINISHED = 3, //Terminado normalmente
+    ABORTED = 4, //Terminado de forma forzosa
 };
 
 typedef struct job { //Cada elemento de tipo TJob se va a corresponder con una línea ejecutada
@@ -69,11 +69,11 @@ int main() {
     }
 
     for(int i=0; i<MAX_JOBS; i++) {
-        job_list[i].job_id = i+1;
+        job_list[i].job_id = i;
     }
 
     while (1) { // Bucle infinito que mantiene viva la MiniShell
-        //check_jobs();
+        check_jobs();
         next_overwritable_job(); //Encuentra el hueco dentro de la lista de jobs
 
         // Leer la entrada del usuario
@@ -136,25 +136,39 @@ void process_command(tline *cmd) {
 
     if (strcmp(cmd->commands[0].argv[0], "jobs") == 0) {
         for (int i = 0; i < MAX_JOBS; i++) {
-            char* job_status = "";
-            switch(job_list[i].status) {
-                case RUNNING:
-                    job_status = "Running";
-                break;
-                case STOPPED:
-                    job_status = "Stopped";
-                break;
-                case FINISHED:
-                    job_status = "Done";
-                break;
-                case ABORTED:
-                    job_status = "Aborted";
-                break;
+            if(strcmp(job_list[i].command, "") != 0 && job_list[i].shown == false) {
+                char* job_status = "";
+                switch(job_list[i].status) {
+                    case RUNNING:
+                        job_status = "Running";
+                    break;
+                    case SUSPENDED:
+                        job_status = "Stopped";
+                    break;
+                    case FINISHED:
+                        job_status = "Done";
+                    break;
+                    case ABORTED:
+                        job_status = "Aborted";
+                    break;
+                }
+
+                printf("[%d]", job_list[i].job_id+1);
+
+                if(job_list[i].job_id == last_job) {
+                    printf("+  ");
+                }
+                else printf("-  ");
+
+                printf("%s \t\t\t %s\n", job_status, job_list[i].command);
+
             }
 
-            printf("[%d]   %s              %s ", job_list[i].job_id, job_status, job_list[i].command);
-            printf("\n");
+            if(job_list[i].status == FINISHED || job_list[i].status == ABORTED) {
+                job_list[i].shown = true;
+            }
         }
+        return;
     }
 
     //Opción extra para mostrar el contenido de job_list
@@ -165,7 +179,7 @@ void process_command(tline *cmd) {
                 case RUNNING:
                     job_status = "Running";
                     break;
-                case STOPPED:
+                case SUSPENDED:
                     job_status = "Stopped";
                     break;
                 case FINISHED:
@@ -187,6 +201,7 @@ void process_command(tline *cmd) {
             printf("Job ID: %d | Status: %s | Shown: %s | Command: %s", job_list[i].job_id, job_status, job_list[i].shown ? "true" : "false", job_list[i].command);
             printf("\n");
         }
+        return;
     }
 
     // Si es un comando externo
