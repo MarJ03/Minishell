@@ -29,8 +29,7 @@ void next_overwritable_job();          // Pendiente: Función para determinar el
 enum job_status {
     RUNNING = 1,  //En ejecución
     SUSPENDED = 2,  //Suspendido
-    FINISHED = 3, //Terminado normalmente
-    ABORTED = 4, //Terminado de forma forzosa
+    FINISHED = 3 //Terminado normalmente
 };
 
 typedef struct job { //Cada elemento de tipo TJob se va a corresponder con una línea ejecutada
@@ -69,10 +68,11 @@ int main() {
     }
 
     for(int i=0; i<MAX_JOBS; i++) {
-        job_list[i].job_id = i;
+        job_list[i].job_id = i+1;
     }
 
     while (1) { // Bucle infinito que mantiene viva la MiniShell
+
         check_jobs();
         next_overwritable_job(); //Encuentra el hueco dentro de la lista de jobs
 
@@ -86,6 +86,7 @@ int main() {
         if (parsed_line != NULL && parsed_line->ncommands > 0) {
             //Crea la línea introducida a partir del tline
             if(parsed_line->background) {
+                //strcpy(job_list[next_job].command,""); //No debería de hacer falta, porque cuando se finaliza un proceso ya se establece el comando como ""
                 for (int j = 0; j < parsed_line->ncommands; j++) {
                     if (parsed_line->commands[j].argv != NULL) {
                         for (int k = 0; k < parsed_line->commands[j].argc; k++) {
@@ -110,7 +111,10 @@ int main() {
         }
 
         prompt_handler();
-        last_job = next_job;
+
+        if(parsed_line->background) {
+            last_job = next_job;
+        }
     }
 
     return 0;
@@ -148,24 +152,27 @@ void process_command(tline *cmd) {
                     case FINISHED:
                         job_status = "Done";
                     break;
-                    case ABORTED:
-                        job_status = "Aborted";
-                    break;
                 }
 
-                printf("[%d]", job_list[i].job_id+1);
+                printf("[%d]", job_list[i].job_id);
 
-                if(job_list[i].job_id == last_job) {
+                if(job_list[i].job_id - 1 == last_job) { //-1 porque job_id empieza por 1 y las posiciones de job_list empiezan por 0
                     printf("+  ");
                 }
                 else printf("-  ");
 
                 printf("%s \t\t\t %s\n", job_status, job_list[i].command);
 
-            }
-
-            if(job_list[i].status == FINISHED || job_list[i].status == ABORTED) {
-                job_list[i].shown = true;
+                //Ya no se va a tener que mostrar de nuevo, pues ya se ha mostrado una vez como hecho
+                if(job_list[i].status == FINISHED) { //Solamente se ejecutará en el caso de que shown sea false y el status sea FINISHED, lo que indicará que acaba de terminar y su posición en job_list debe ser vaciada
+                    strcpy(job_list[i].command, "");
+                    job_list[i].ncommands = 0;
+                    if(job_list[i].pid_array != NULL) {
+                        free(job_list[i].pid_array);
+                        job_list[i].pid_array = NULL;
+                    }
+                    job_list[i].shown = true;
+                }
             }
         }
         return;
@@ -184,9 +191,6 @@ void process_command(tline *cmd) {
                     break;
                 case FINISHED:
                     job_status = "Done";
-                    break;
-                case ABORTED:
-                    job_status = "Aborted";
                     break;
             }
 
@@ -288,6 +292,10 @@ void process_command(tline *cmd) {
         free(pipe_array);
     }
 
+    //Si son procesos de background, muestra su job_id y el pid del último hijo creado
+    if(cmd->background) {
+        printf("[%d] %d",job_list[next_job].job_id,job_list[next_job].pid_array[cmd->ncommands-1]);
+    }
 
     // Esperar a que todos los hijos terminen
     for (int j = 0; j < cmd->ncommands; j++) {
@@ -465,12 +473,15 @@ void check_jobs() {
     //Comprueba para cada uno de los jobs si han terminado, y actualiza su estado dentro de job_list
     for(i=0; i<MAX_JOBS; i++){
         if(job_list[i].command != NULL && job_list[i].pid_array != NULL) {
-            Tjob job = job_list[i];
             int exit_status;
-            pid_t current_job_pids[job.ncommands];
+            pid_t pid = 0;
+            pid_t current_job_pids[job_list[i].ncommands];
 
-            for(j=0; j<job.ncommands; j++){
-                pid_t pid = waitpid(job_list[i].pid_array[j], &exit_status, WNOHANG);
+            for(j=0; j<job_list[i].ncommands; j++){
+
+                if(job_list[i].status == RUNNING) {
+                    pid = waitpid(job_list[i].pid_array[j], &exit_status, WNOHANG);
+                }
 
                 if(pid < 0){
                     perror("waitpid");
@@ -481,7 +492,7 @@ void check_jobs() {
             }
 
             bool all_finished = true;
-            for(k=0; k<job.ncommands; k++){
+            for(k=0; k<job_list[i].ncommands; k++){
                 if(current_job_pids[k] == 0){
                     all_finished = false;
                     break;
@@ -493,9 +504,17 @@ void check_jobs() {
                     job_list[i].status = FINISHED; // Marcar como terminado
                     job_list[i].shown = false;    // Y marcar como todavía no mostrado
                 }
+                //Reinicia el hueco del job, porque nunca se muestra como abortado
                 else if (WIFSIGNALED(exit_status)) {
-                    job_list[i].status = ABORTED; // Marcar como abortado
-                    job_list[i].shown = false;    // Y marcar como todavía no mostrado
+                    job_list[i].status = FINISHED; // Marcar como abortado
+                    strcpy(job_list[i].command, "");
+                    job_list[i].ncommands = 0;
+                    if(job_list[i].pid_array != NULL) {
+                        free(job_list[i].pid_array);
+                        job_list[i].pid_array = NULL;
+                    }
+                    printf("Liberado array de pids");
+                    job_list[i].shown = true;
                 }
             }
         }
