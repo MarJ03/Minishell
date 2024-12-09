@@ -135,6 +135,114 @@ void process_command(tline *cmd) {
         return;
     }
 
+    if (strcmp(cmd->commands[0].argv[0], "bg") == 0) {
+        int selected_job = atoi(cmd->commands[0].argv[1]);
+        if(selected_job >= 1 && selected_job <= MAX_JOBS) {
+            for(int i=0; i<MAX_JOBS; i++) {
+                if(job_list[i].job_id == selected_job) {
+
+                    if(job_list[i].status == SUSPENDED) { //Está parado y le llega bg
+                        for(int j=0; j<job_list[i].ncommands; j++) {
+                            kill(job_list[i].pid_array[j], SIGCONT);
+                        }
+                        strcat(job_list[i].command, "&");
+                        job_list[i].status = RUNNING;
+                        printf("[%d]+ %s", job_list[i].job_id, job_list[i].command);
+
+                        prev_last_job = last_job; //Actualizamos el último comando para que salga con el símbolo correcto al ejecutar jobs
+                        last_job = next_job;
+                        return;
+                    }
+
+                    else if(job_list[i].status == FINISHED && job_list[i].ncommands > 0) { //Está terminado y le llega bg
+                        printf("bg: el trabajo %d ya ha terminado", selected_job);
+                        return;
+                    }
+
+                    else if(job_list[i].status == RUNNING){ //Está en ejecución y le llega bg
+                        printf("bg: el trabajo %d ya está en segundo plano", selected_job);
+                        return;
+                    }
+                }
+            }
+        }
+
+        printf("bg: el trabajo %d no existe", selected_job); //Si no ha salido de la ejecución hasta ahora, es que el job introducido no existe
+        return;
+    }
+
+    if (strcmp(cmd->commands[0].argv[0], "jobs") == 0) {
+        for (int i = 0; i < MAX_JOBS; i++) {
+            if(strcmp(job_list[i].command, "") != 0 && job_list[i].shown == false) {
+                char* job_status = "";
+                switch(job_list[i].status) {
+                    case RUNNING:
+                        job_status = "Running";
+                    break;
+                    case SUSPENDED:
+                        job_status = "Stopped";
+                    break;
+                    case FINISHED:
+                        job_status = "Done";
+                    break;
+                }
+
+                printf("[%d]", job_list[i].job_id);
+
+                if(job_list[last_job].status == FINISHED && job_list[last_job].shown == true) {
+                    if(job_list[i].job_id - 1 == prev_last_job) { //-1 porque job_id empieza por 1 y las posiciones de job_list empiezan por 0
+                        printf("+  ");
+                    }
+                    else printf("-  ");
+                }
+                else {
+                    if(job_list[i].job_id - 1 == last_job) { //-1 porque job_id empieza por 1 y las posiciones de job_list empiezan por 0
+                        printf("+  ");
+                    }
+                    else printf("-  ");
+                }
+
+                printf("%s \t\t\t %s\n", job_status, job_list[i].command);
+
+                //Ya no se va a tener que mostrar de nuevo, pues ya se ha mostrado una vez como hecho
+                if(job_list[i].status == FINISHED) { //Solamente se ejecutará en el caso de que shown sea false y el status sea FINISHED, lo que indicará que acaba de terminar y su posición en job_list debe ser vaciada
+                    free_job(&job_list[i]);
+                }
+            }
+        }
+        return;
+    }
+
+    //Opción extra para mostrar el contenido de job_list
+    if (strcmp(cmd->commands[0].argv[0], "debug") == 0) {
+        for (int i = 0; i < MAX_JOBS; i++) {
+            char* job_status = "";
+            switch(job_list[i].status) {
+                case RUNNING:
+                    job_status = "Running";
+                    break;
+                case SUSPENDED:
+                    job_status = "Stopped";
+                    break;
+                case FINISHED:
+                    job_status = "Done";
+                    break;
+            }
+
+            printf("PIDs: [");
+            if(job_list->pid_array != NULL) {
+                for (int p = 0; p < job_list[i].ncommands; p++) {
+                    printf(" %d ", job_list[i].pid_array[p]);
+                }
+            }
+            printf("] | ");
+
+            printf("Job ID: %d | Status: %s | Shown: %s | Command: %s", job_list[i].job_id, job_status, job_list[i].shown ? "true" : "false", job_list[i].command);
+            printf("\n");
+        }
+        return;
+    }
+
     // Pipes y procesos externos
     int **pipe_array = NULL;
 
@@ -231,8 +339,7 @@ void process_command(tline *cmd) {
 
         // Esperar a que todos los procesos terminen o sean suspendidos
         int status;
-        pid_t pid;
-        while ((pid = waitpid(-pgid, &status, WUNTRACED)) > 0) {
+        while ((waitpid(-pgid, &status, WUNTRACED)) > 0) {
             if (WIFSTOPPED(status)) { // Proceso suspendido
                 fg_job.status = SUSPENDED;
 
