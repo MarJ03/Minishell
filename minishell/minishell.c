@@ -121,198 +121,144 @@ int main() {
 }
 
 void process_command(tline *cmd) {
-
-    // Comprobar si es un comando interno (cd, exit o umask)
+    // Verificar si es un comando interno (cd, exit, umask, etc.)
     if (strcmp(cmd->commands[0].argv[0], "cd") == 0) {
-        run_cd(cmd); // Cambiar directorio
+        run_cd(cmd);
         return;
     }
-
     if (strcmp(cmd->commands[0].argv[0], "exit") == 0) {
-        run_exit(); // Salir de la MiniShell
+        run_exit();
         return;
     }
-
     if (strcmp(cmd->commands[0].argv[0], "umask") == 0) {
-        run_umask(cmd); // Cambiar o consultar umask
+        run_umask(cmd);
         return;
     }
 
-    if (strcmp(cmd->commands[0].argv[0], "bg") == 0 && atoi(cmd->commands[0].argv[1]) > 0) {
-        int selected_job = atoi(cmd->commands[0].argv[1]);
-        //Falta implementar
-        return;
-    }
-
-    if (strcmp(cmd->commands[0].argv[0], "jobs") == 0) {
-        for (int i = 0; i < MAX_JOBS; i++) {
-            if(strcmp(job_list[i].command, "") != 0 && job_list[i].shown == false) {
-                char* job_status = "";
-                switch(job_list[i].status) {
-                    case RUNNING:
-                        job_status = "Running";
-                    break;
-                    case SUSPENDED:
-                        job_status = "Stopped";
-                    break;
-                    case FINISHED:
-                        job_status = "Done";
-                    break;
-                }
-
-                printf("[%d]", job_list[i].job_id);
-
-                if(job_list[last_job].status == FINISHED && job_list[last_job].shown == true) {
-                    if(job_list[i].job_id - 1 == prev_last_job) { //-1 porque job_id empieza por 1 y las posiciones de job_list empiezan por 0
-                        printf("+  ");
-                    }
-                    else printf("-  ");
-                }
-                else {
-                    if(job_list[i].job_id - 1 == last_job) { //-1 porque job_id empieza por 1 y las posiciones de job_list empiezan por 0
-                        printf("+  ");
-                    }
-                    else printf("-  ");
-                }
-
-                printf("%s \t\t\t %s\n", job_status, job_list[i].command);
-
-                //Ya no se va a tener que mostrar de nuevo, pues ya se ha mostrado una vez como hecho
-                if(job_list[i].status == FINISHED) { //Solamente se ejecutará en el caso de que shown sea false y el status sea FINISHED, lo que indicará que acaba de terminar y su posición en job_list debe ser vaciada
-                    free_job(&job_list[i]);
-                }
-            }
-        }
-        return;
-    }
-
-    //Opción extra para mostrar el contenido de job_list
-    if (strcmp(cmd->commands[0].argv[0], "debug") == 0) {
-        for (int i = 0; i < MAX_JOBS; i++) {
-            char* job_status = "";
-            switch(job_list[i].status) {
-                case RUNNING:
-                    job_status = "Running";
-                    break;
-                case SUSPENDED:
-                    job_status = "Stopped";
-                    break;
-                case FINISHED:
-                    job_status = "Done";
-                    break;
-            }
-
-            printf("PIDs: [");
-            if(job_list->pid_array != NULL) {
-                for (int p = 0; p < job_list[i].ncommands; p++) {
-                    printf(" %d ", job_list[i].pid_array[p]);
-                }
-            }
-            printf("] | ");
-
-            printf("Job ID: %d | Status: %s | Shown: %s | Command: %s", job_list[i].job_id, job_status, job_list[i].shown ? "true" : "false", job_list[i].command);
-            printf("\n");
-        }
-        return;
-    }
-
-    // Si es un comando externo
+    // Pipes y procesos externos
     int **pipe_array = NULL;
-    //Crea el array de pipes
-    if(cmd->ncommands > 1) {
+
+    // Crear array de pipes si hay más de un comando
+    if (cmd->ncommands > 1) {
         pipe_array = (int **)malloc((cmd->ncommands - 1) * sizeof(int *));
         for (int i = 0; i < cmd->ncommands - 1; i++) {
             pipe_array[i] = (int *)malloc(2 * sizeof(int));
             if (pipe(pipe_array[i]) < 0) {
-                perror("Error creando la pipe");
+                perror("Error creando pipe");
                 exit(1);
             }
         }
     }
 
+    pid_t pgid = 0; // ID del grupo de procesos para manejar el pipeline
+
     for (int j = 0; j < cmd->ncommands; j++) {
-        const pid_t pid = fork();
+        pid_t pid = fork();
         if (pid < 0) {
-            perror("Error al crear el proceso");
+            perror("Error al crear proceso");
             exit(1);
         }
 
         if (pid == 0) { // Proceso hijo
+            // Redirección de señales
+            signal(SIGINT, SIG_DFL);
+            signal(SIGTSTP, SIG_DFL);
 
-            //Modificación de comportamiento de señales
-            //Si es un proceso de background, ignora la señal Ctrl+C
-            if(cmd->background) {
-                signal(SIGINT, SIG_IGN); //Pendiente de probar cuando haya procesos en background
-                signal(SIGTSTP, SIG_IGN);          //Si llega la señal Ctrl+Z la ignora
+            // Redirecciones para pipes
+            if (j < cmd->ncommands - 1) { // No es el último, redirige salida
+                dup2(pipe_array[j][1], STDOUT_FILENO);
+            }
+            if (j > 0) { // No es el primero, redirige entrada
+                dup2(pipe_array[j - 1][0], STDIN_FILENO);
             }
 
-            if(cmd->ncommands > 1) {
-                //Redirecciones intermedias de pipes
-                // Todos los comandos menos el último tienen que redirigir su salida hacia el siguiente pipe
-                if (j < cmd->ncommands - 1) {
-                    dup2(pipe_array[j][1], STDOUT_FILENO);
-                }
+            // Redirecciones de entrada/salida específicas
+            if (j == 0 && cmd->redirect_input) {
+                input_redirect(cmd->redirect_input);
+            }
+            if (j == cmd->ncommands - 1 && cmd->redirect_output) {
+                output_redirect(cmd->redirect_output);
+            }
 
-                // Todos los comandos menos el último tienen que redirigir su salida hacia el pipe anterior
-                if (j > 0) {
-                    dup2(pipe_array[j - 1][0], STDIN_FILENO);
-                }
-
-                //Redirecciones de entrada y salida del primer y último mandato de la línea
-                // Si es el primer comando y se requiere redirigir la entrada
-                if (j == 0 && cmd->redirect_input) {
-                    input_redirect(cmd->redirect_input);
-                }
-
-                // Si es el último comando y se requiere redirigir la salida
-                if (j == cmd->ncommands - 1 && cmd->redirect_output) {
-                    output_redirect(cmd->redirect_output);
-                }
-
-                // Cerrar todas las pipes que no se estén utilizando
-                for (int i = 0; i < cmd->ncommands - 1; i++) { // Es < ncommands -1 porque hay un pipe menos que el número de comandos y además el for empieza en 0
+            // Cerrar pipes no utilizados
+            if (pipe_array != NULL) {
+                for (int i = 0; i < cmd->ncommands - 1; i++) {
                     close(pipe_array[i][0]);
                     close(pipe_array[i][1]);
                 }
             }
 
-            // Ejecutar el comando
+            // Ejecutar comando
             execvp(cmd->commands[j].argv[0], cmd->commands[j].argv);
-
-            // Si execvp falla
-            perror("Error al ejecutar el comando");
+            perror("Error al ejecutar comando");
             exit(1);
-        }
+        } else { // Proceso padre
+            if (j == 0) {
+                // Configurar grupo de procesos para el pipeline
+                pgid = pid;
+                setpgid(pid, pgid);
+            } else {
+                setpgid(pid, pgid);
+            }
 
-        else { //Si es el padre
-            if(cmd->background) {
-                job_list[next_job].pid_array[j] = pid;
+            // Guardar el PID en fg_job si es foreground
+            if (!cmd->background) {
+                fg_job.pid_array[j] = pid;
+            }
+
+            // Cerrar pipes no utilizados
+            if (pipe_array != NULL) {
+                if (j > 0) { // Cerrar pipe de entrada
+                    close(pipe_array[j - 1][0]);
+                }
+                if (j < cmd->ncommands - 1) { // Cerrar pipe de salida
+                    close(pipe_array[j][1]);
+                }
             }
         }
     }
 
-    // Cerrar todas las pipes en el padre
-    if(pipe_array != NULL) {
+    // Liberar memoria de pipes
+    if (pipe_array != NULL) {
         for (int i = 0; i < cmd->ncommands - 1; i++) {
-            close(pipe_array[i][0]);
-            close(pipe_array[i][1]);
             free(pipe_array[i]);
         }
         free(pipe_array);
     }
 
-    //Si son procesos de background, muestra su job_id y el pid del último hijo creado
-    if(cmd->background) {
-        printf("[%d] %d",job_list[next_job].job_id,job_list[next_job].pid_array[cmd->ncommands-1]);
-    }
+    if (!cmd->background) { // Si es un proceso en foreground
+        fg_job.status = RUNNING;
 
-    // Esperar a que todos los hijos terminen
-    for (int j = 0; j < cmd->ncommands; j++) {
-        if(cmd->background == 0) { //Únicamente espera por los hijos que son procesos en foreground
-            wait(NULL);
+        // Esperar a que todos los procesos terminen o sean suspendidos
+        int status;
+        pid_t pid;
+        while ((pid = waitpid(-pgid, &status, WUNTRACED)) > 0) {
+            if (WIFSTOPPED(status)) { // Proceso suspendido
+                fg_job.status = SUSPENDED;
+
+                // Mover proceso a la lista de trabajos
+                job_list[next_job].ncommands = fg_job.ncommands;
+                strcpy(job_list[next_job].command, fg_job.command);
+                job_list[next_job].status = SUSPENDED;
+                job_list[next_job].shown = false;
+                job_list[next_job].pid_array = (pid_t *)malloc(fg_job.ncommands * sizeof(pid_t));
+
+                for (int i = 0; i < fg_job.ncommands; i++) {
+                    job_list[next_job].pid_array[i] = fg_job.pid_array[i];
+                }
+
+                printf("\n[%d]+   Stopped                   %s\n", job_list[next_job].job_id, job_list[next_job].command);
+                next_overwritable_job();
+                break;
+            } else if (WIFEXITED(status)) { // Proceso terminado
+                fg_job.status = FINISHED;
+            }
         }
+    } else { // Si es background, mostrar el job ID y el último PID
+        printf("[%d] %d\n", job_list[next_job].job_id, job_list[next_job].pid_array[cmd->ncommands - 1]);
     }
 }
+
 
 
 // Redirigir la entrada desde un archivo
@@ -468,40 +414,12 @@ void prompt_handler() {
 }
 
 // Cuando se detecta Ctrl+Z, cambia el estado del único job en foreground a "Suspendido" y muestra por pantalla su estado actual
-void stop_handler() {
-    fg_job.status = SUSPENDED;
-
-    job_list[next_job].ncommands = fg_job.ncommands;
-    strcpy(job_list[next_job].command, fg_job.command);
-    job_list[next_job].status = fg_job.status;
-    job_list[next_job].shown = false;
-    job_list[next_job].pid_array = (pid_t*)malloc(fg_job.ncommands * sizeof(pid_t));
-
-    for(int i=0; i < fg_job.ncommands; i++) {
-        job_list[next_job].pid_array[i] = fg_job.pid_array[i];
-        //kill(fg_job.pid_array[i], SIGTSTP);
+void stop_handler(int signo) {
+    if (fg_job.ncommands > 0 && fg_job.status == RUNNING) {
+        // Enviar SIGTSTP al grupo de procesos del fg_job
+        kill(-fg_job.pid_array[0], SIGTSTP); // -pid para enviar al grupo de procesos
     }
-
-    char* job_status = "";
-    switch(job_list[next_job].status) {
-        case RUNNING:
-            job_status = "Running";
-        break;
-        case SUSPENDED:
-            job_status = "Stopped";
-        break;
-        case FINISHED:
-            job_status = "Done";
-        break;
-    }
-
-    printf("\n[%d]+   %s \t\t\t %s\n", job_list[next_job].job_id, job_status, job_list[next_job].command);
-
-
-    next_overwritable_job();
-    prompt_handler();
 }
-
 void check_jobs() {
     int i,j,k;
     int job_id_counter = 1;
