@@ -42,6 +42,7 @@ Tjob fg_job; //Información del único proceso en ejecución en foreground
 void process_command(tline *cmd);      // Procesar un comando y ejecutarlo
 void input_redirect(const char *file); // Configurar redirección de entrada
 void output_redirect(const char *file);// Configurar redirección de salida
+void error_redirect (const char *file); // Configurar redirección de errores
 void run_cd(tline *cmd);               // Comando interno para cambiar directorio
 void run_umask(tline *cmd);            // Comando interno umask
 void run_exit();                       // Comando interno para salir de la MiniShell
@@ -291,6 +292,11 @@ void process_command(tline *cmd) {
                 output_redirect(cmd->redirect_output);
             }
 
+            if (cmd->redirect_error && cmd->ncommands > 0 && cmd->ncommands == 1) {
+                // Solo aplicamos redirección de error al último comando
+                error_redirect(cmd->redirect_error);
+            }
+
             // Cerrar pipes no utilizados
             if (pipe_array != NULL) {
                 for (int i = 0; i < cmd->ncommands - 1; i++) {
@@ -411,6 +417,21 @@ void output_redirect(const char *file) {
     }
     dup2(fd, STDOUT_FILENO); // Redirigir salida estándar
     close(fd); // Cerrar el archivo
+}
+
+void error_redirect(const char *file) {
+    // Abrir archivo para redirigir tanto stdout como stderr
+    int fd = open(file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) {
+        fprintf(stderr, "Error al abrir el archivo para redirigir stderr: %s\n", strerror(errno));
+        exit(1);
+    }
+
+    // Redirigir stdout y stderr al mismo archivo
+    dup2(fd, STDOUT_FILENO); // Redirigir stdout
+    dup2(fd, STDERR_FILENO); // Redirigir stderr
+
+    close(fd); // Cerrar el descriptor de archivo
 }
 
 // Implementación del comando 'cd'
