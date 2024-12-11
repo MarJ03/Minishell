@@ -519,6 +519,13 @@ void run_exit() {
 }
 
 void prompt_handler() {
+
+    if (fg_job.ncommands>0 && fg_job.status == RUNNING) {
+        for (int i=0; i<fg_job.ncommands; i++) {
+            kill(fg_job.pid_array[i], SIGKILL);
+        }
+    }
+
     char current_dir[MAX_PATH];        // Buffer para la ruta del directorio actual
     // Obtener el directorio actual y manejar errores
     if (getcwd(current_dir, sizeof(current_dir)) == NULL) {
@@ -532,7 +539,7 @@ void prompt_handler() {
 }
 
 // Cuando se detecta Ctrl+Z, cambia el estado del único job en foreground a "Suspendido" y muestra por pantalla su estado actual
-void stop_handler(int signo) {
+void stop_handler() {
     if (fg_job.ncommands > 0 && fg_job.status == RUNNING) {
         // Enviar SIGTSTP al grupo de procesos del fg_job
         kill(-fg_job.pid_array[0], SIGTSTP); // -pid para enviar al grupo de procesos
