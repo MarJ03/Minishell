@@ -99,36 +99,25 @@ int main() {
 
         // Parsear la línea introducida
         parsed_line = tokenize(input);
+        if (parsed_line != NULL && parsed_line->ncommands > 0) {
+            //Crea la línea introducida a partir del tline
+            if(parsed_line->background) {
+                fill_job(&job_list[next_job], parsed_line);
+            }
+            else {
+                free_job(&fg_job);
+                fill_job(&fg_job, parsed_line);
+            }
 
-        bool valid = true;
-        for(int i=0; i<parsed_line->ncommands; i++) {
-            if(strcmp(parsed_line->commands[i].argv[0],"umask") == 0) {
-                printf("El comando umask no puede ejecutarse con pipes");
-                valid = false;
-                break;
+            // Solo procesar un comando en esta implementación inicial
+            process_command(parsed_line);
+
+            if(parsed_line->background) {
+                prev_last_job = last_job;
+                last_job = next_job;
             }
         }
 
-        if(valid) {
-            if (parsed_line != NULL && parsed_line->ncommands > 0) {
-                //Crea la línea introducida a partir del tline
-                if(parsed_line->background) {
-                    fill_job(&job_list[next_job], parsed_line);
-                }
-                else {
-                    free_job(&fg_job);
-                    fill_job(&fg_job, parsed_line);
-                }
-
-                // Solo procesar un comando en esta implementación inicial
-                process_command(parsed_line);
-
-                if(parsed_line->background) {
-                    prev_last_job = last_job;
-                    last_job = next_job;
-                }
-            }
-        }
         prompt_handler();
     }
 
