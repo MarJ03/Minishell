@@ -51,6 +51,8 @@ void check_jobs();                     // Comprueba para todos los jobs si todos
 void fill_job(Tjob* job, tline* parsed_line);              // Rellena el job requerido con sus campos correspondientes
 void free_job(Tjob* job);              // Restaura los datos de un job a los datos por defecto
 void next_overwritable_job();          // Pendiente: Función para determinar el hueco en job_list del siguiente proceso a ejecutar
+void sigchld_handler(); // Declarar manejador
+
 
 
 int main() {
@@ -58,6 +60,7 @@ int main() {
 
     signal(SIGINT, prompt_handler);    //Si llega la señal Ctrl+C ejecuta prompt_handler
     signal(SIGTSTP, stop_handler);          //Si llega la señal Ctrl+Z la ignora
+    signal (SIGCHLD, sigchld_handler);   // Envía al proceso padre cuando uno de sus hijos termina
 
     prompt_handler(); //Imprime el prompt
 
@@ -309,9 +312,15 @@ void process_command(tline *cmd) {
                 setpgid(pid, pgid);
             }
 
-            // Guardar el PID en fg_job si es foreground
+            // Guardar el PID en fg_job si es foreground // Guardar el PID en fg_job si es un proceso en foreground
             if (!cmd->background) {
                 fg_job.pid_array[j] = pid;
+            } else { //necestimaos esto para casos en los que se mande a bg un comando "instantáneo". Si no está inicializado
+                //el PID da 0, cosa errónea
+                if (job_list[next_job].pid_array == NULL) {
+                    job_list[next_job].pid_array = (pid_t *)malloc(cmd->ncommands * sizeof(pid_t));
+                }
+                job_list[next_job].pid_array[j] = pid;
             }
 
             // Cerrar pipes no utilizados
@@ -361,6 +370,8 @@ void process_command(tline *cmd) {
                 fg_job.status = FINISHED;
             }
         }
+
+
     } else { // Si es background, mostrar el job ID y el último PID
         printf("[%d] %d\n", job_list[next_job].job_id, job_list[next_job].pid_array[cmd->ncommands - 1]);
     }
@@ -552,9 +563,13 @@ void check_jobs() {
                     pid = waitpid(job_list[i].pid_array[j], &exit_status, WNOHANG);
                 }
 
-                if(pid < 0){
+                if (pid < 0) {
+                    if (errno == ECHILD) {
+                        // Proceso ya manejado por SIGCHLD
+                        continue;
+                    }
                     perror("waitpid");
-                    exit(1); //Sale de la minishell si hay algún error con los pids
+                    exit(1);
                 }
 
                 current_job_pids[j] = pid;
@@ -629,3 +644,22 @@ void free_job(Tjob* job) {
     job->shown = true;
 }
 
+void sigchld_handler() {
+    int saved_errno = errno; // Guardar errno para restaurarlo después
+    int status;
+    pid_t pid;
+
+    // Recolectar procesos hijos terminados sin bloquear
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        for (int i = 0; i < MAX_JOBS; i++) {
+            if (job_list[i].pid_array && job_list[i].pid_array[0] == pid) {
+                // Marcar el proceso como terminado
+                job_list[i].status = FINISHED;
+                job_list[i].shown = false;
+            }
+        }
+    }
+
+    // Restaurar errno
+    errno = saved_errno;
+}
