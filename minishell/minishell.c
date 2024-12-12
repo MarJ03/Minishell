@@ -35,6 +35,7 @@ Tjob* job_list; //Estructura para almacenar la información de los comandos dent
 int next_job = 0; //Siguiente posición libre de job_list
 int last_job = -1; //Posición del último job almacenado
 int prev_last_job = -1; //Posición del penúltimo job almacenado
+int iter = -1;     //numero de iteracion en el programa
 tline *parsed_line; // Estructura para almacenar comandos analizados
 Tjob fg_job; //Información del único proceso en ejecución en foreground
 
@@ -102,11 +103,24 @@ int main() {
 
         // Parsear la línea introducida
         parsed_line = tokenize(input);
+        iter ++;
 
         valid = true;
         for(i=0; i<parsed_line->ncommands; i++) {
             if(strcmp(parsed_line->commands[i].argv[0],"umask") == 0) {
                 printf("El comando umask no puede ejecutarse con pipes");
+                valid = false;
+                break;
+            }
+
+            if(strcmp(parsed_line->commands[i].argv[0],"jobs") == 0 && iter==0) {
+                printf("   ");
+                valid = false;
+                break;
+            }
+
+            if(strcmp(parsed_line->commands[i].argv[0],"bg") == 0 && iter==0) {
+                printf("   ");
                 valid = false;
                 break;
             }
