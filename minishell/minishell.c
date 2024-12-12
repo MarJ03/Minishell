@@ -117,9 +117,11 @@ int main() {
         valid = true;
         for(i=0; i<parsed_line->ncommands; i++) {
             if(strcmp(parsed_line->commands[i].argv[0],"umask") == 0) {
-                printf("El comando umask no puede ejecutarse con pipes");
-                valid = false;
-                break;
+                if(parsed_line->ncommands > 1) { // Si hay más de un comando, hay pipes
+                    printf("El comando umask no puede ejecutarse con pipes");
+                    valid = false;
+                    break;
+                }
             }
 
             if(strcmp(parsed_line->commands[i].argv[0],"jobs") == 0 && is_job_list_empty()) {
@@ -563,7 +565,7 @@ void run_umask(tline *cmd) {
     if (cmd->commands[0].argc == 1) {
         // Si no se proporciona argumento, simplemente mostramos el valor actual de umask
         current_umask = umask(0);  // Esto "lee" el umask actual y lo restablece
-        printf("Valor de máscara (umask) actual: %03o\n", current_umask);  // Muestra el valor en formato octal con 3 dígitos
+        printf("Valor de máscara (umask) actual: %04o\n", current_umask);  // Muestra el valor en formato octal con 3 dígitos
         umask(current_umask);  // Restablecer la máscara al valor original
 
     } else {
@@ -583,7 +585,9 @@ void run_umask(tline *cmd) {
         // Establecer la nueva umask
         new_umask = (mode_t)umask_value;
         umask(new_umask);  // Cambiar la máscara de umask
-        printf("Máscara (umask) cambiada a: %o\n", new_umask);  // Mostrar el nuevo valor en octal
+        printf("Máscara (umask) cambiada a: %04o\n", new_umask);  // Mostrar el nuevo valor en octal
+
+
     }
 }
 
