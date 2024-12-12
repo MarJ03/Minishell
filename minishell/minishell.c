@@ -208,7 +208,7 @@ void process_command(tline *cmd) {
                         printf("[%d]+ %s", job_list[i].job_id, job_list[i].command);
 
                         prev_last_job = last_job; //Actualizamos el último comando para que salga con el símbolo correcto al ejecutar jobs
-                        last_job = next_job;
+                        last_job = selected_job - 1;
                         return;
                     }
 
@@ -247,24 +247,23 @@ void process_command(tline *cmd) {
 
                 printf("[%d]", job_list[i].job_id);
 
-                if(job_list[last_job].status == FINISHED && job_list[last_job].shown == true) {
-                    if(job_list[i].job_id - 1 == prev_last_job) { //-1 porque job_id empieza por 1 y las posiciones de job_list empiezan por 0
-                        printf("+  ");
-                    }
-                    else printf("-  ");
+                if(i == last_job) { //-1 porque job_id empieza por 1 y las posiciones de job_list empiezan por 0
+                    printf("+  ");
                 }
-                else {
-                    if(job_list[i].job_id - 1 == last_job) { //-1 porque job_id empieza por 1 y las posiciones de job_list empiezan por 0
-                        printf("+  ");
-                    }
-                    else printf("-  ");
-                }
+                else printf("-  ");
 
                 printf("%s \t\t\t %s\n", job_status, job_list[i].command);
+
+                fflush(stdout);
 
                 //Ya no se va a tener que mostrar de nuevo, pues ya se ha mostrado una vez como hecho
                 if(job_list[i].status == FINISHED) { //Solamente se ejecutará en el caso de que shown sea false y el status sea FINISHED, lo que indicará que acaba de terminar y su posición en job_list debe ser vaciada
                     free_job(&job_list[i]);
+
+                    if(job_list[i].job_id-1 == last_job) {
+                        last_job = prev_last_job; //Se actualizan los índices para mantener actualizado el último job ejecutado
+                        prev_last_job = -1;
+                    }
                 }
             }
         }
@@ -418,7 +417,12 @@ void process_command(tline *cmd) {
                 }
 
                 printf("\n[%d]+   Stopped                   %s\n", job_list[next_job].job_id, job_list[next_job].command);
-                next_overwritable_job();
+
+                prev_last_job = last_job; //Actualiza los índices para que el último job sea el recién parado
+                last_job = next_job;
+
+                next_overwritable_job(); //Busca un nuevo hueco vacío en job_list para poner el siguiente job a ejecutar
+
                 break;
 
             }
