@@ -35,7 +35,6 @@ Tjob* job_list; //Estructura para almacenar la información de los comandos dent
 int next_job = 0; //Siguiente posición libre de job_list
 int last_job = -1; //Posición del último job almacenado
 int prev_last_job = -1; //Posición del penúltimo job almacenado
-int iter = -1;     //numero de iteracion en el programa
 tline *parsed_line; // Estructura para almacenar comandos analizados
 Tjob fg_job; //Información del único proceso en ejecución en foreground
 
@@ -55,6 +54,7 @@ void fill_job(Tjob* job, tline* parsed_line);              // Rellena el job req
 void free_job(Tjob* job);              // Restaura los datos de un job a los datos por defecto
 void next_overwritable_job();          // Pendiente: Función para determinar el hueco en job_list del siguiente proceso a ejecutar
 void sigchld_handler(); // Declarar manejador
+bool is_job_list_empty();
 
 
 
@@ -62,6 +62,7 @@ int main() {
     char input[1024];                  // Buffer para almacenar la entrada del usuario
     int i;
     bool valid;
+
 
     signal(SIGINT, prompt_handler);    //Si llega la señal Ctrl+C ejecuta prompt_handler
     signal(SIGTSTP, stop_handler);          //Si llega la señal Ctrl+Z la ignora
@@ -103,8 +104,7 @@ int main() {
 
         // Parsear la línea introducida
         parsed_line = tokenize(input);
-        iter ++;
-
+       
         valid = true;
         for(i=0; i<parsed_line->ncommands; i++) {
             if(strcmp(parsed_line->commands[i].argv[0],"umask") == 0) {
@@ -113,13 +113,13 @@ int main() {
                 break;
             }
 
-            if(strcmp(parsed_line->commands[i].argv[0],"jobs") == 0 && iter==0) {
+            if(strcmp(parsed_line->commands[i].argv[0],"jobs") == 0 && is_job_list_empty()) {
                 printf("   ");
                 valid = false;
                 break;
             }
 
-            if(strcmp(parsed_line->commands[i].argv[0],"bg") == 0 && iter==0) {
+            if(strcmp(parsed_line->commands[i].argv[0],"bg") == 0 && is_job_list_empty()) {
                 printf("   ");
                 valid = false;
                 break;
@@ -740,4 +740,18 @@ void sigchld_handler() {
 
     // Restaurar errno
     errno = saved_errno;
+}
+
+
+
+bool is_job_list_empty() {
+    for (int i = 0; i < MAX_JOBS; i++) {
+        // Verificamos si el trabajo está vacío (sin comandos, terminado, sin procesos asociados)
+        if (job_list[i].ncommands != 0 ||
+            job_list[i].status != FINISHED ||
+            job_list[i].pid_array != NULL) {
+            return false;  // Si encontramos un trabajo activo, la lista no está vacía
+            }
+    }
+    return true;  // Si todos los trabajos están vacíos, la lista está vacía
 }
