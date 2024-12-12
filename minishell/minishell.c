@@ -30,6 +30,7 @@ typedef struct job { //Cada elemento de tipo TJob se va a corresponder con una l
 } Tjob;
 
 
+//Variables globales
 Tjob* job_list; //Estructura para almacenar la información de los comandos dentro de la minishell
 int next_job = 0; //Siguiente posición libre de job_list
 int last_job = -1; //Posición del último job almacenado
@@ -58,6 +59,8 @@ void sigchld_handler(); // Declarar manejador
 
 int main() {
     char input[1024];                  // Buffer para almacenar la entrada del usuario
+    int i;
+    bool valid;
 
     signal(SIGINT, prompt_handler);    //Si llega la señal Ctrl+C ejecuta prompt_handler
     signal(SIGTSTP, stop_handler);          //Si llega la señal Ctrl+Z la ignora
@@ -68,7 +71,7 @@ int main() {
     job_list = (Tjob*) malloc(MAX_JOBS * sizeof(Tjob)); //Lista de comandos hijos (sin incluir a la propia minishell)
 
     //Inicializamos todos los jobs de job_list
-    for (int i = 0; i < MAX_JOBS; i++) {
+    for (i = 0; i < MAX_JOBS; i++) {
         job_list[i].ncommands = 0;
         job_list[i].command = (char*)malloc(MAX_LINE_LENGTH * sizeof(char)); //Texto vacío en el que irá la línea introducida
         job_list[i].status = FINISHED;  // Considerar todos los huecos como terminados inicialmente
@@ -83,7 +86,7 @@ int main() {
     fg_job.shown = true;       // Por defecto, mostrados
     fg_job.pid_array = NULL;           // Indicador de proceso inexistente
 
-    for(int i=0; i<MAX_JOBS; i++) {
+    for(i=0; i<MAX_JOBS; i++) {
         job_list[i].job_id = i+1;
     }
 
@@ -100,8 +103,8 @@ int main() {
         // Parsear la línea introducida
         parsed_line = tokenize(input);
 
-        bool valid = true;
-        for(int i=0; i<parsed_line->ncommands; i++) {
+        valid = true;
+        for(i=0; i<parsed_line->ncommands; i++) {
             if(strcmp(parsed_line->commands[i].argv[0],"umask") == 0) {
                 printf("El comando umask no puede ejecutarse con pipes");
                 valid = false;
@@ -110,7 +113,7 @@ int main() {
         }
 
         if(valid) {
-            if (parsed_line != NULL && parsed_line->ncommands > 0) {
+            if (parsed_line->ncommands > 0) {
                 //Crea la línea introducida a partir del tline
                 if(parsed_line->background) {
                     fill_job(&job_list[next_job], parsed_line);
@@ -120,7 +123,6 @@ int main() {
                     fill_job(&fg_job, parsed_line);
                 }
 
-                // Solo procesar un comando en esta implementación inicial
                 process_command(parsed_line);
 
                 if(parsed_line->background) {
@@ -136,6 +138,11 @@ int main() {
 }
 
 void process_command(tline *cmd) {
+    int selected_job, i, j, p, status;
+    char* job_status;
+    int **pipe_array;
+    pid_t pgid, pid;
+
     // Verificar si es un comando interno (cd, exit, umask, etc.)
     if (strcmp(cmd->commands[0].argv[0], "cd") == 0) {
         run_cd(cmd);
@@ -151,13 +158,13 @@ void process_command(tline *cmd) {
     }
 
     if (strcmp(cmd->commands[0].argv[0], "bg") == 0) {
-        int selected_job = atoi(cmd->commands[0].argv[1]);
+        selected_job = atoi(cmd->commands[0].argv[1]);
         if(selected_job >= 1 && selected_job <= MAX_JOBS) {
-            for(int i=0; i<MAX_JOBS; i++) {
+            for(i=0; i<MAX_JOBS; i++) {
                 if(job_list[i].job_id == selected_job) {
 
                     if(job_list[i].status == SUSPENDED) { //Está parado y le llega bg
-                        for(int j=0; j<job_list[i].ncommands; j++) {
+                        for(j=0; j<job_list[i].ncommands; j++) {
                             kill(job_list[i].pid_array[j], SIGCONT);
                         }
                         strcat(job_list[i].command, "&");
@@ -187,9 +194,9 @@ void process_command(tline *cmd) {
     }
 
     if (strcmp(cmd->commands[0].argv[0], "jobs") == 0) {
-        for (int i = 0; i < MAX_JOBS; i++) {
+        for (i = 0; i < MAX_JOBS; i++) {
             if(strcmp(job_list[i].command, "") != 0 && job_list[i].shown == false) {
-                char* job_status = "";
+                job_status = "";
                 switch(job_list[i].status) {
                     case RUNNING:
                         job_status = "Running";
@@ -230,8 +237,8 @@ void process_command(tline *cmd) {
 
     //Opción extra para mostrar el contenido de job_list
     if (strcmp(cmd->commands[0].argv[0], "debug") == 0) {
-        for (int i = 0; i < MAX_JOBS; i++) {
-            char* job_status = "";
+        for (i = 0; i < MAX_JOBS; i++) {
+            job_status = "";
             switch(job_list[i].status) {
                 case RUNNING:
                     job_status = "Running";
@@ -246,7 +253,7 @@ void process_command(tline *cmd) {
 
             printf("PIDs: [");
             if(job_list->pid_array != NULL) {
-                for (int p = 0; p < job_list[i].ncommands; p++) {
+                for (p = 0; p < job_list[i].ncommands; p++) {
                     printf(" %d ", job_list[i].pid_array[p]);
                 }
             }
@@ -259,12 +266,12 @@ void process_command(tline *cmd) {
     }
 
     // Pipes y procesos externos
-    int **pipe_array = NULL;
+    pipe_array = NULL;
 
     // Crear array de pipes si hay más de un comando
     if (cmd->ncommands > 1) {
         pipe_array = (int **)malloc((cmd->ncommands - 1) * sizeof(int *));
-        for (int i = 0; i < cmd->ncommands - 1; i++) {
+        for (i = 0; i < cmd->ncommands - 1; i++) {
             pipe_array[i] = (int *)malloc(2 * sizeof(int));
             if (pipe(pipe_array[i]) < 0) {
                 perror("Error creando pipe");
@@ -273,10 +280,10 @@ void process_command(tline *cmd) {
         }
     }
 
-    pid_t pgid = 0; // ID del grupo de procesos para manejar el pipeline
+    pgid = 0; // ID del grupo de procesos para manejar el pipeline
 
-    for (int j = 0; j < cmd->ncommands; j++) {
-        pid_t pid = fork();
+    for (j = 0; j < cmd->ncommands; j++) {
+        pid = fork();
         if (pid < 0) {
             perror("Error al crear proceso");
             exit(1);
@@ -287,12 +294,15 @@ void process_command(tline *cmd) {
             signal(SIGINT, SIG_DFL);
             signal(SIGTSTP, SIG_DFL);
 
-            // Redirecciones para pipes
-            if (j < cmd->ncommands - 1) { // No es el último, redirige salida
-                dup2(pipe_array[j][1], STDOUT_FILENO);
-            }
-            if (j > 0) { // No es el primero, redirige entrada
-                dup2(pipe_array[j - 1][0], STDIN_FILENO);
+            //Si el número de comandos es mayor a 1, ya se habrá creado el array de pipes antes y no dará error
+            if (cmd->ncommands > 1) {
+                // Redirecciones para pipes
+                if (j < cmd->ncommands - 1) { // No es el último, redirige salida
+                    dup2(pipe_array[j][1], STDOUT_FILENO);
+                }
+                if (j > 0) { // No es el primero, redirige entrada
+                    dup2(pipe_array[j - 1][0], STDIN_FILENO);
+                }
             }
 
             // Redirecciones de entrada/salida específicas
@@ -310,7 +320,7 @@ void process_command(tline *cmd) {
 
             // Cerrar pipes no utilizados
             if (pipe_array != NULL) {
-                for (int i = 0; i < cmd->ncommands - 1; i++) {
+                for (i = 0; i < cmd->ncommands - 1; i++) {
                     close(pipe_array[i][0]);
                     close(pipe_array[i][1]);
                 }
@@ -320,7 +330,9 @@ void process_command(tline *cmd) {
             execvp(cmd->commands[j].argv[0], cmd->commands[j].argv);
             perror("Error al ejecutar comando");
             exit(1);
+
         } else { // Proceso padre
+
             if (j == 0) {
                 // Configurar grupo de procesos para el pipeline
                 pgid = pid;
@@ -354,7 +366,7 @@ void process_command(tline *cmd) {
 
     // Liberar memoria de pipes
     if (pipe_array != NULL) {
-        for (int i = 0; i < cmd->ncommands - 1; i++) {
+        for (i = 0; i < cmd->ncommands - 1; i++) {
             free(pipe_array[i]);
         }
         free(pipe_array);
@@ -364,7 +376,6 @@ void process_command(tline *cmd) {
         fg_job.status = RUNNING;
 
         // Esperar a que todos los procesos terminen o sean suspendidos
-        int status;
         while ((waitpid(-pgid, &status, WUNTRACED)) > 0) {
             if (WIFSTOPPED(status)) { // Proceso suspendido
                 fg_job.status = SUSPENDED;
@@ -376,20 +387,21 @@ void process_command(tline *cmd) {
                 job_list[next_job].shown = false;
                 job_list[next_job].pid_array = (pid_t *)malloc(fg_job.ncommands * sizeof(pid_t));
 
-                for (int i = 0; i < fg_job.ncommands; i++) {
+                for (i = 0; i < fg_job.ncommands; i++) {
                     job_list[next_job].pid_array[i] = fg_job.pid_array[i];
                 }
 
                 printf("\n[%d]+   Stopped                   %s\n", job_list[next_job].job_id, job_list[next_job].command);
                 next_overwritable_job();
                 break;
-            } else if (WIFEXITED(status)) { // Proceso terminado
+
+            }
+            else if (WIFEXITED(status)) { // Proceso terminado
                 fg_job.status = FINISHED;
             }
         }
-
-
-    } else { // Si es background, mostrar el job ID y el último PID
+    }
+    else { // Si es background, mostrar el job ID y el último PID
         printf("[%d] %d\n", job_list[next_job].job_id, job_list[next_job].pid_array[cmd->ncommands - 1]);
     }
 }
@@ -431,8 +443,7 @@ void output_redirect(const char *file) {
 }
 
 void error_redirect(const char *file) {
-    // Abrir archivo para redirigir tanto stdout como stderr
-    int fd = open(file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    int fd = open(file, O_WRONLY | O_CREAT | O_TRUNC, 0644); // Abrir archivo para redirigir tanto stdout como stderr
     if (fd < 0) {
         fprintf(stderr, "Error al abrir el archivo para redirigir stderr: %s\n", strerror(errno));
         exit(1);
@@ -449,8 +460,9 @@ void error_redirect(const char *file) {
 void run_cd(tline *cmd) {
     static char prev_dir[MAX_PATH] = ""; // Almacena el directorio anterior
     char current_dir[MAX_PATH];         // Buffer para el directorio actual
-
     const char *directory = NULL;
+    const char *home;
+    static char expanded_path[MAX_PATH];
 
     // Si no se proporcionan argumentos, usar la variable HOME
     if (cmd->commands[0].argc == 1) {
@@ -468,16 +480,16 @@ void run_cd(tline *cmd) {
         directory = prev_dir;
     } else if (cmd->commands[0].argv[1][0] == '~') {
         // Expande el tilde (~) a HOME
-        const char *home = getenv("HOME");
+        home = getenv("HOME");
         if (home == NULL) {
             fprintf(stderr, "Error: No se encontró la variable HOME\n");
             return;
         }
 
         // Concatenar HOME con la ruta relativa después de '~'
-        static char expanded_path[MAX_PATH];
         snprintf(expanded_path, sizeof(expanded_path), "%s%s", home, cmd->commands[0].argv[1] + 1);
         directory = expanded_path;
+
     } else {
         // Usar el argumento proporcionado como ruta
         directory = cmd->commands[0].argv[1];
@@ -492,6 +504,7 @@ void run_cd(tline *cmd) {
     // Intentar cambiar el directorio
     if (chdir(directory) != 0) {
         fprintf(stderr, "Error al cambiar a '%s': %s\n", directory, strerror(errno));
+
     } else {
         // Guardar el directorio anterior para el próximo "cd -"
         strncpy(prev_dir, current_dir, sizeof(prev_dir) - 1);
@@ -500,6 +513,7 @@ void run_cd(tline *cmd) {
         // Mostrar el nuevo directorio actual
         if (getcwd(current_dir, sizeof(current_dir)) == NULL) {
             perror("Error al obtener el directorio actual después de cambiar");
+
         } else {
             printf("Directorio actual: %s\n", current_dir);
         }
@@ -509,25 +523,31 @@ void run_cd(tline *cmd) {
 
 //Implementacion del comando 'umask'
 void run_umask(tline *cmd) {
+    mode_t current_umask;
+
+    /* necesitamos fincadena para saber si la conversión a octal se completa, o por lo contrario, no lo hace, pudiendo
+    quedar caracteres no válidos después del número. Ejemplo: 22b--> al apuntar a b, se dará cuenta de que la
+    conversión no está bien hecha, y no pasará un valor no válido a umask. Se pasa como & porque strtol necesita
+    modificar la cadena para la tranformación, aunque se quede a la mitad */
+    char *fincadena;
+    const char *umask_value_str;
+    long umask_value;
+    mode_t new_umask;
+
+
     // Verificar si se proporcionó un argumento para umask
     if (cmd->commands[0].argc == 1) {
         // Si no se proporciona argumento, simplemente mostramos el valor actual de umask
-        mode_t current_umask = umask(0);  // Esto "lee" el umask actual y lo restablece
+        current_umask = umask(0);  // Esto "lee" el umask actual y lo restablece
         printf("Valor de máscara (umask) actual: %03o\n", current_umask);  // Muestra el valor en formato octal con 3 dígitos
         umask(current_umask);  // Restablecer la máscara al valor original
+
     } else {
-
-        // necesitamos fincadena para saber si la conversión a octal se completa, o por lo contrario, no lo hace, pudiendo
-        // quedar caracteres no válidos después del número. Ejemplo: 22b--> al apuntar a b, se dará cuenta de que la
-        //conversión no está bien hecha, y no pasará un valor no válido a umask. Se pasa como & porque strtol necesita
-        // modificar la cadena para la tranformación, aunque se quede a la mitad
-        char *fincadena;
         // Si se proporciona un argumento, validamos que sea un valor octal válido
-        const char *umask_value_str = cmd->commands[0].argv[1];
-
+        umask_value_str = cmd->commands[0].argv[1];
 
         // Convertir el valor a un número entero
-        long umask_value = strtol(umask_value_str, &fincadena, 8);  // Base 8 para octal
+        umask_value = strtol(umask_value_str, &fincadena, 8);  // Base 8 para octal
 
         // Verificar si la conversión fue exitosa
         if (*fincadena != '\0' || umask_value < 0 || umask_value > 0777) {
@@ -537,7 +557,7 @@ void run_umask(tline *cmd) {
         }
 
         // Establecer la nueva umask
-        mode_t new_umask = (mode_t)umask_value;
+        new_umask = (mode_t)umask_value;
         umask(new_umask);  // Cambiar la máscara de umask
         printf("Máscara (umask) cambiada a: %o\n", new_umask);  // Mostrar el nuevo valor en octal
     }
@@ -551,14 +571,15 @@ void run_exit() {
 }
 
 void prompt_handler() {
+    int i;
+    char current_dir[MAX_PATH]; // Buffer para la ruta del directorio actual
 
     if (fg_job.ncommands>0 && fg_job.status == RUNNING) {
-        for (int i=0; i<fg_job.ncommands; i++) {
+        for (i=0; i<fg_job.ncommands; i++) {
             kill(fg_job.pid_array[i], SIGKILL);
         }
     }
 
-    char current_dir[MAX_PATH];        // Buffer para la ruta del directorio actual
     // Obtener el directorio actual y manejar errores
     if (getcwd(current_dir, sizeof(current_dir)) == NULL) {
         perror("Error al obtener el directorio actual");
@@ -577,9 +598,12 @@ void stop_handler() {
         kill(-fg_job.pid_array[0], SIGTSTP); // -pid para enviar al grupo de procesos
     }
 }
+
 void check_jobs() {
-    int i,j,k;
+    int i,j,k, exit_status;
     int job_id_counter = 1;
+    pid_t pid;
+    bool all_finished;
 
     //Para mostrar el job_id en orden de colocación dentro de job_list, se recolocan los ids en función del contenido actual de job_list
     for(i=0; i<MAX_JOBS; i++){
@@ -592,8 +616,7 @@ void check_jobs() {
     //Comprueba para cada uno de los jobs si han terminado, y actualiza su estado dentro de job_list
     for(i=0; i<MAX_JOBS; i++){
         if(job_list[i].command != NULL && job_list[i].pid_array != NULL) {
-            int exit_status;
-            pid_t pid = 0;
+            pid = 0;
             pid_t current_job_pids[job_list[i].ncommands];
 
             for(j=0; j<job_list[i].ncommands; j++){
@@ -614,7 +637,7 @@ void check_jobs() {
                 current_job_pids[j] = pid;
             }
 
-            bool all_finished = true;
+            all_finished = true;
             for(k=0; k<job_list[i].ncommands; k++){
                 if(current_job_pids[k] == 0){
                     all_finished = false;
@@ -650,10 +673,12 @@ void next_overwritable_job() {
 }
 
 void fill_job(Tjob* job, tline* parsed_line) {
+    int j, k;
+
     //strcpy(job.command,""); //No debería de hacer falta, porque cuando se finaliza un proceso ya se establece el comando como ""
-    for (int j = 0; j < parsed_line->ncommands; j++) {
+    for (j = 0; j < parsed_line->ncommands; j++) {
         if (parsed_line->commands[j].argv != NULL) {
-            for (int k = 0; k < parsed_line->commands[j].argc; k++) {
+            for (k = 0; k < parsed_line->commands[j].argc; k++) {
                 strcat(job->command, parsed_line->commands[j].argv[k]);
                 strcat(job->command, " ");
             }
@@ -685,12 +710,12 @@ void free_job(Tjob* job) {
 
 void sigchld_handler() {
     int saved_errno = errno; // Guardar errno para restaurarlo después
-    int status;
+    int status, i;
     pid_t pid;
 
     // Recolectar procesos hijos terminados sin bloquear
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-        for (int i = 0; i < MAX_JOBS; i++) {
+        for (i = 0; i < MAX_JOBS; i++) {
             if (job_list[i].pid_array && job_list[i].pid_array[0] == pid) {
                 // Marcar el proceso como terminado
                 job_list[i].status = FINISHED;
