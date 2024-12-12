@@ -32,6 +32,7 @@ typedef struct job { //Cada elemento de tipo TJob se va a corresponder con una l
 
 //Variables globales
 Tjob* job_list; //Estructura para almacenar la información de los comandos dentro de la minishell
+int **pipe_array = NULL; // Array de pipes necesarios para la comunicación entre mandatos
 int next_job = 0; //Siguiente posición libre de job_list
 int last_job = -1; //Posición del último job almacenado
 int prev_last_job = -1; //Posición del penúltimo job almacenado
@@ -133,8 +134,8 @@ int main() {
                     fill_job(&job_list[next_job], parsed_line);
                 }
                 else {
-                    free_job(&fg_job);
-                    fill_job(&fg_job, parsed_line);
+                    free_job(&fg_job); //Libera y vacía el contenido de fg_job para evitar sobrescrituras erróneas
+                    fill_job(&fg_job, parsed_line); //Llena fg_job con la nueva información del proceso en foreground
                 }
 
                 process_command(parsed_line);
@@ -154,18 +155,30 @@ int main() {
 void process_command(tline *cmd) {
     int selected_job, i, j, p, status;
     char* job_status;
-    int **pipe_array;
     pid_t pgid, pid;
+
+    //Libera el array de pipes y lo deja a NULL. Si fuese necesario se inicializa de nuevo más adelante
+    // Liberar memoria de pipes
+    if (pipe_array != NULL) {
+        for (i = 0; i < cmd->ncommands - 1; i++) {
+            free(pipe_array[i]);
+        }
+        free(pipe_array);
+        pipe_array = NULL;
+    }
 
     // Verificar si es un comando interno (cd, exit, umask, etc.)
     if (strcmp(cmd->commands[0].argv[0], "cd") == 0) {
         run_cd(cmd);
         return;
     }
+
     if (strcmp(cmd->commands[0].argv[0], "exit") == 0) {
         run_exit();
-        return;
+        printf("Saliendo de la MiniShell...\n");
+        exit(0); // Terminar el programa correctamente
     }
+
     if (strcmp(cmd->commands[0].argv[0], "umask") == 0) {
         run_umask(cmd);
         return;
@@ -280,8 +293,6 @@ void process_command(tline *cmd) {
     }
 
     // Pipes y procesos externos
-    pipe_array = NULL;
-
     // Crear array de pipes si hay más de un comando
     if (cmd->ncommands > 1) {
         pipe_array = (int **)malloc((cmd->ncommands - 1) * sizeof(int *));
@@ -376,14 +387,6 @@ void process_command(tline *cmd) {
                 }
             }
         }
-    }
-
-    // Liberar memoria de pipes
-    if (pipe_array != NULL) {
-        for (i = 0; i < cmd->ncommands - 1; i++) {
-            free(pipe_array[i]);
-        }
-        free(pipe_array);
     }
 
     if (!cmd->background) { // Si es un proceso en foreground
@@ -577,11 +580,23 @@ void run_umask(tline *cmd) {
     }
 }
 
-// Implementación del comando 'exit'
+// Implementación del comando 'exit'. Como no sabemos en el momento en el que se ejecuta se libera toda la memoria dinámica asignada
 void run_exit() {
+    int i, j , status;
+
+    //1. Finalizar procesos hijos y vaciar job_list
+    for(i=0; i<MAX_JOBS; i++) {
+        if(job_list[i].pid_array != NULL) {
+            for(j=0; j<job_list[i].ncommands; j++) {
+                kill(job_list[i].pid_array[j], SIGKILL);
+                waitpid(job_list[i].pid_array[j], &status, 0); // Bloquea hasta que un hijo termine
+            }
+            free(job_list[i].pid_array);
+        }
+        free(job_list[i].command);
+    }
     free(job_list);
-    printf("Saliendo de la MiniShell...\n");
-    exit(0); // Terminar el programa
+    //No es necesario liberar la memoria de pipe_array, pues ya se libera cada vez que se ejecuta process_command
 }
 
 void prompt_handler() {
