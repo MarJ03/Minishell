@@ -9,7 +9,6 @@
 #include <sys/stat.h>  // Necesaria para la función umask
 #include "parser/parser.h" // Librería personalizada para analizar líneas de comandos
 
-#define MAX_PATH 1024 // Tamaño máximo del buffer para rutas
 #define MAX_JOBS 20 //Número máximo de comandos simultáneos en ejecución en la minishell
 #define MAX_LINE_LENGTH 1024
 
@@ -44,18 +43,18 @@ Tjob fg_job; //Información del único proceso en ejecución en foreground
 void process_command(tline *cmd);      // Procesar un comando y ejecutarlo
 void input_redirect(const char *file); // Configurar redirección de entrada
 void output_redirect(const char *file);// Configurar redirección de salida
-void error_redirect (const char *file); // Configurar redirección de errores
+void error_redirect (const char *file);// Configurar redirección de errores
 void run_cd(tline *cmd);               // Comando interno para cambiar directorio
 void run_umask(tline *cmd);            // Comando interno umask
 void run_exit();                       // Comando interno para salir de la MiniShell
-void prompt_handler();                 // Impresión del prompt de la Minishell
+void fg_handler();                     // Impresión del prompt de la Minishell
 void stop_handler();                   // Cuando se detecta Ctrl+Z, cambia el estado del único job en foreground a "Suspendido" y muestra por pantalla su estado actual
 void check_jobs();                     // Comprueba para todos los jobs si todos los procesos que componen un job han terminado, y renombra los job_id en función de los elementos de job_list
 void fill_job(Tjob* job, tline* parsed_line);              // Rellena el job requerido con sus campos correspondientes
 void free_job(Tjob* job);              // Restaura los datos de un job a los datos por defecto
 void next_overwritable_job();          // Pendiente: Función para determinar el hueco en job_list del siguiente proceso a ejecutar
-void sigchld_handler(); // Declarar manejador
-bool is_job_list_empty();
+void sigchld_handler();                // Atiende a hijos que han terminado, cambiando su estado y marcándolos como pendientes de mostrar
+bool is_job_list_empty();              // Comprueba si job_list está o no vacía
 
 
 
@@ -63,13 +62,12 @@ int main() {
     char input[1024];                  // Buffer para almacenar la entrada del usuario
     int i;
     bool valid;
+    char current_dir[MAX_LINE_LENGTH]; // Buffer para la ruta del directorio actual
 
 
-    signal(SIGINT, prompt_handler);    //Si llega la señal Ctrl+C ejecuta prompt_handler
+    signal(SIGINT, fg_handler);    //Si llega la señal Ctrl+C ejecuta fg_handler
     signal(SIGTSTP, stop_handler);          //Si llega la señal Ctrl+Z la ignora
     signal (SIGCHLD, sigchld_handler);   // Envía al proceso padre cuando uno de sus hijos termina
-
-    prompt_handler(); //Imprime el prompt
 
     job_list = (Tjob*) malloc(MAX_JOBS * sizeof(Tjob)); //Lista de comandos hijos (sin incluir a la propia minishell)
 
@@ -97,6 +95,16 @@ int main() {
 
         check_jobs();
         next_overwritable_job(); //Encuentra el hueco dentro de la lista de jobs
+
+        //Imprime el prompt
+        // Obtener el directorio actual y manejar errores
+        if (getcwd(current_dir, sizeof(current_dir)) == NULL) {
+            perror("Error al obtener el directorio actual");
+        }
+        // Mostrar el prompt con la ruta actual
+        printf("\n%s> ", current_dir);
+        fflush(stdout); //Limpia el buffer intermedio de la salida estándar
+
 
         // Leer la entrada del usuario
         if (!fgets(input, sizeof(input), stdin)) {
@@ -146,7 +154,6 @@ int main() {
                 }
             }
         }
-        prompt_handler();
     }
 
     return 0;
@@ -475,11 +482,11 @@ void error_redirect(const char *file) {
 
 // Implementación del comando 'cd'
 void run_cd(tline *cmd) {
-    static char prev_dir[MAX_PATH] = ""; // Almacena el directorio anterior
-    char current_dir[MAX_PATH];         // Buffer para el directorio actual
+    static char prev_dir[MAX_LINE_LENGTH] = ""; // Almacena el directorio anterior
+    char current_dir[MAX_LINE_LENGTH];         // Buffer para el directorio actual
     const char *directory = NULL;
     const char *home;
-    static char expanded_path[MAX_PATH];
+    static char expanded_path[MAX_LINE_LENGTH];
 
     // Si no se proporcionan argumentos, usar la variable HOME
     if (cmd->commands[0].argc == 1) {
@@ -599,25 +606,14 @@ void run_exit() {
     //No es necesario liberar la memoria de pipe_array, pues ya se libera cada vez que se ejecuta process_command
 }
 
-void prompt_handler() {
+void fg_handler() {
     int i;
-    char current_dir[MAX_PATH]; // Buffer para la ruta del directorio actual
 
     if (fg_job.ncommands>0 && fg_job.status == RUNNING) {
         for (i=0; i<fg_job.ncommands; i++) {
             kill(fg_job.pid_array[i], SIGKILL);
         }
     }
-
-    // Obtener el directorio actual y manejar errores
-    if (getcwd(current_dir, sizeof(current_dir)) == NULL) {
-        perror("Error al obtener el directorio actual");
-    }
-
-    // Mostrar el prompt con la ruta actual
-    printf("\n%s> ", current_dir);
-
-    fflush(stdout); //Limpia el buffer intermedio de la salida estándar
 }
 
 // Cuando se detecta Ctrl+Z, cambia el estado del único job en foreground a "Suspendido" y muestra por pantalla su estado actual
@@ -756,8 +752,6 @@ void sigchld_handler() {
     // Restaurar errno
     errno = saved_errno;
 }
-
-
 
 bool is_job_list_empty() {
     for (int i = 0; i < MAX_JOBS; i++) {
