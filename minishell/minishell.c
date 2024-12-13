@@ -693,7 +693,8 @@ void check_jobs() {
 }
 
 void next_overwritable_job() {
-    for (int i = 0; i < MAX_JOBS; i++) {
+    int i;
+    for (i = 0; i < MAX_JOBS; i++) {
         // Si el hueco está vacío o es un proceso en background mostrado, es válido
         if (job_list[i].status == FINISHED && job_list[i].ncommands == 0 && job_list[i].shown) {
             next_job = i;
@@ -762,7 +763,8 @@ void sigchld_handler() {
 }
 
 bool is_job_list_empty() {
-    for (int i = 0; i < MAX_JOBS; i++) {
+    int i;
+    for (i = 0; i < MAX_JOBS; i++) {
         // Verificamos si el trabajo está vacío (sin comandos, terminado, sin procesos asociados)
         if (job_list[i].ncommands != 0 ||
             job_list[i].status != FINISHED ||
