@@ -176,6 +176,20 @@ void process_command(tline *cmd) {
         pipe_array = NULL;
     }
 
+    // Comprobar si es un pipeline
+    if (cmd->ncommands > 1) {
+        // Verificar si algún comando interno está en un pipeline
+        for (j = 0; j < cmd->ncommands; j++) {
+            if (strcmp(cmd->commands[j].argv[0], "cd") == 0 ||
+                strcmp(cmd->commands[j].argv[0], "exit") == 0 ||
+                strcmp(cmd->commands[j].argv[0], "jobs") == 0 ||
+                strcmp(cmd->commands[j].argv[0], "bg") == 0) {
+                // Comando interno encontrado en un pipeline, no se ejecuta
+                return; // Salir y devolver al prompt
+                }
+        }
+    }
+
     // Verificar si es un comando interno (cd, exit, umask, etc.)
     if (strcmp(cmd->commands[0].argv[0], "cd") == 0) {
         run_cd(cmd);
