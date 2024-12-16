@@ -115,25 +115,20 @@ int main() {
         parsed_line = tokenize(input);
        
         valid = true;
-        for(i=0; i<parsed_line->ncommands; i++) {
-            if(strcmp(parsed_line->commands[i].argv[0],"umask") == 0) {
-                if(parsed_line->ncommands > 1) { // Si hay más de un comando, hay pipes
-                    printf("El comando umask no puede ejecutarse con pipes");
+        // Comprobar si es un pipeline
+        if (parsed_line->ncommands > 1) {
+            // Verificar si algún comando interno está en un pipeline
+            for (i = 0; i < parsed_line->ncommands; i++) {
+                if (strcmp(parsed_line->commands[i].argv[0], "cd") == 0 ||
+                    strcmp(parsed_line->commands[i].argv[0], "exit") == 0 ||
+                    strcmp(parsed_line->commands[i].argv[0], "jobs") == 0 ||
+                    strcmp(parsed_line->commands[i].argv[0], "bg") == 0 ||
+                    strcmp(parsed_line->commands[i].argv[0],"umask") == 0)
+                    {
+                    printf("No pueden ejecutarse mandatos internos con pipes");
                     valid = false;
                     break;
                 }
-            }
-
-            if(strcmp(parsed_line->commands[i].argv[0],"jobs") == 0 && is_job_list_empty()) {
-                printf("   ");
-                valid = false;
-                break;
-            }
-
-            if(strcmp(parsed_line->commands[i].argv[0],"bg") == 0 && is_job_list_empty()) {
-                printf("   ");
-                valid = false;
-                break;
             }
         }
 
@@ -157,7 +152,6 @@ int main() {
             }
         }
     }
-
     return 0;
 }
 
@@ -174,20 +168,6 @@ void process_command(tline *cmd) {
         }
         free(pipe_array);
         pipe_array = NULL;
-    }
-
-    // Comprobar si es un pipeline
-    if (cmd->ncommands > 1) {
-        // Verificar si algún comando interno está en un pipeline
-        for (j = 0; j < cmd->ncommands; j++) {
-            if (strcmp(cmd->commands[j].argv[0], "cd") == 0 ||
-                strcmp(cmd->commands[j].argv[0], "exit") == 0 ||
-                strcmp(cmd->commands[j].argv[0], "jobs") == 0 ||
-                strcmp(cmd->commands[j].argv[0], "bg") == 0) {
-                // Comando interno encontrado en un pipeline, no se ejecuta
-                return; // Salir y devolver al prompt
-                }
-        }
     }
 
     // Verificar si es un comando interno (cd, exit, umask, etc.)

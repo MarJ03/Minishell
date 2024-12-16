@@ -1,2 +1,2 @@
 #!/bin/bash
-gcc -o minishell minishell.c -L./parser -lparser -I./parser -no-pie
+gcc -Wall -Wextra -o minishell minishell.c -L./parser -lparser -I./parser -no-pie
