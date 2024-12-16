@@ -117,7 +117,7 @@ int main() {
         valid = true;
         // Comprobar si es un pipeline
         if (parsed_line->ncommands > 1) {
-            // Verificar si algún comando interno está en un pipeline
+            // Verificar si algún comando interno esta tratando de ejecutarse con pipes
             for (i = 0; i < parsed_line->ncommands; i++) {
                 if (strcmp(parsed_line->commands[i].argv[0], "cd") == 0 ||
                     strcmp(parsed_line->commands[i].argv[0], "exit") == 0 ||
@@ -130,6 +130,11 @@ int main() {
                     break;
                 }
             }
+        }
+
+        // Prohibe ejecutar los comandos bg o jobs si la lista de joba está vacía
+        if((strcmp(parsed_line->commands[0].argv[0],"jobs") == 0 || strcmp(parsed_line->commands[0].argv[0],"bg") == 0) && is_job_list_empty()) {
+            valid = false;
         }
 
         if(valid) {
