@@ -1,3 +1,4 @@
+#include <ctype.h>      //comporbación de espacios
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,21 +41,23 @@ Tjob fg_job; //Información del único proceso en ejecución en foreground
 
 
 // Declaración de funciones
-void process_command(tline *cmd);      // Procesar un comando y ejecutarlo
-void input_redirect(const char *file); // Configurar redirección de entrada
-void output_redirect(const char *file);// Configurar redirección de salida
-void error_redirect (const char *file);// Configurar redirección de errores
-void run_cd(tline *cmd);               // Comando interno para cambiar directorio
-void run_umask(tline *cmd);            // Comando interno umask
-void run_exit();                       // Comando interno para salir de la MiniShell
-void fg_handler();                     // Impresión del prompt de la Minishell
-void stop_handler();                   // Cuando se detecta Ctrl+Z, cambia el estado del único job en foreground a "Suspendido" y muestra por pantalla su estado actual
-void check_jobs();                     // Comprueba para todos los jobs si todos los procesos que componen un job han terminado, y renombra los job_id en función de los elementos de job_list
-void fill_job(Tjob* job, tline* parsed_line);              // Rellena el job requerido con sus campos correspondientes
-void free_job(Tjob* job);              // Restaura los datos de un job a los datos por defecto
-void next_overwritable_job();          // Pendiente: Función para determinar el hueco en job_list del siguiente proceso a ejecutar
-void sigchld_handler();                // Atiende a hijos que han terminado, cambiando su estado y marcándolos como pendientes de mostrar
-bool is_job_list_empty();              // Comprueba si job_list está o no vacía
+void process_command(tline *cmd);
+// Procesar un comando y ejecutarlo
+void input_redirect(const char *file);          // Configurar redirección de entrada
+void output_redirect(const char *file);         // Configurar redirección de salida
+void error_redirect (const char *file);         // Configurar redirección de errores
+void run_cd(tline *cmd);                        // Comando interno para cambiar directorio
+void run_umask(tline *cmd);                     // Comando interno umask
+void run_exit();                                // Comando interno para salir de la MiniShell
+void fg_handler();                              // Impresión del prompt de la Minishell
+void stop_handler();                            // Cuando se detecta Ctrl+Z, cambia el estado del único job en foreground a "Suspendido" y muestra por pantalla su estado actual
+void check_jobs();                              // Comprueba para todos los jobs si todos los procesos que componen un job han terminado, y renombra los job_id en función de los elementos de job_list
+void fill_job(Tjob* job, tline* parsed_line);   // Rellena el job requerido con sus campos correspondientes
+void free_job(Tjob* job);                       // Restaura los datos de un job a los datos por defecto
+void next_overwritable_job();                   // Pendiente: Función para determinar el hueco en job_list del siguiente proceso a ejecutar
+void sigchld_handler();                         // Atiende a hijos que han terminado, cambiando su estado y marcándolos como pendientes de mostrar
+bool is_job_list_empty();                       // Comprueba si job_list está o no vacía
+bool is_empty_or_spaces(const char *str);       //devuelve si la linea introudicda por pantalla es un espacio o enter
 
 
 
@@ -110,6 +113,11 @@ int main() {
         // Leer la entrada del usuario
         if (!fgets(input, sizeof(input), stdin)) {
             break; // Salir si hay un error o EOF
+        }
+
+        // Verificar si la línea es vacía o contiene solo espacios
+        if (is_empty_or_spaces(input)) {
+            continue; // Si es vacía, imprime el prompt de nuevo
         }
 
         // Parsear la línea introducida
@@ -821,4 +829,14 @@ bool is_job_list_empty() {
             }
     }
     return true;  // Si todos los trabajos están vacíos, la lista está vacía
+}
+
+bool is_empty_or_spaces(const char *str) {
+    while (*str) { // Recorre cada carácter de la cadena
+        if (!isspace((unsigned char)*str)) { // Si encuentra un carácter que no es un espacio
+            return false;
+        }
+        str++;
+    }
+    return true; // Solo contiene espacios o está vacía
 }
