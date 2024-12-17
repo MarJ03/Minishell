@@ -61,6 +61,7 @@ bool is_job_list_empty();              // Comprueba si job_list está o no vací
 int main() {
     char input[1024];                  // Buffer para almacenar la entrada del usuario
     int i;
+    int original_stdin, original_stdout, original_stderr;
     bool valid;
     char current_dir[MAX_LINE_LENGTH]; // Buffer para la ruta del directorio actual
 
@@ -115,6 +116,31 @@ int main() {
         parsed_line = tokenize(input);
        
         valid = true;
+
+        //Redireccionar pipes del mandato interno
+        original_stdin = -1;
+        original_stdout = -1;
+        original_stderr = -1;
+        if (parsed_line->ncommands == 1 && (strcmp(parsed_line->commands[0].argv[0], "cd") == 0 ||
+                                            strcmp(parsed_line->commands[0].argv[0], "exit") == 0 ||
+                                            strcmp(parsed_line->commands[0].argv[0], "jobs") == 0 ||
+                                            strcmp(parsed_line->commands[0].argv[0], "bg") == 0 ||
+                                            strcmp(parsed_line->commands[0].argv[0],"umask") == 0))
+        {
+            if(parsed_line->redirect_input) {
+                original_stdin = dup(STDIN_FILENO);
+                input_redirect(parsed_line->redirect_input);
+            }
+            if(parsed_line->redirect_output) {
+                original_stdout = dup(STDOUT_FILENO);
+                output_redirect(parsed_line->redirect_output);
+            }
+            if(parsed_line->redirect_error) {
+                original_stderr = dup(STDERR_FILENO);
+                error_redirect(parsed_line->redirect_error);
+            }
+        }
+
         // Comprobar si es un pipeline
         if (parsed_line->ncommands > 1) {
             // Verificar si algún comando interno esta tratando de ejecutarse con pipes
@@ -153,6 +179,20 @@ int main() {
                 if(parsed_line->background) {
                     prev_last_job = last_job;
                     last_job = next_job;
+                }
+
+                //Únicamente se va a ejecutar cuando solamente haya redirecciones en el mandato interno
+                if (original_stdin != -1) {
+                    dup2(original_stdin, STDIN_FILENO);
+                    close(original_stdin);
+                }
+                if(original_stdout != -1) {
+                    dup2(original_stdout, STDOUT_FILENO);
+                    close(original_stdout);
+                }
+                if(original_stderr != -1) {
+                    dup2(original_stderr, STDERR_FILENO);
+                    close(original_stderr);
                 }
             }
         }
