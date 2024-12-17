@@ -159,7 +159,16 @@ int main() {
         }
 
         // Prohibe ejecutar los comandos bg o jobs si la lista de joba está vacía
-        if((strcmp(parsed_line->commands[0].argv[0],"jobs") == 0 || strcmp(parsed_line->commands[0].argv[0],"bg") == 0) && is_job_list_empty()) {
+        if(strcmp(parsed_line->commands[0].argv[0],"jobs") == 0 && is_job_list_empty()) {
+            valid = false;
+        } else if(strcmp(parsed_line->commands[0].argv[0],"bg") == 0 && is_job_list_empty()) {
+            if(parsed_line->commands[0].argv[1] != NULL) {
+                printf("bg: el trabajo %s no existe", parsed_line->commands[0].argv[1]);
+            }
+            else {
+                printf("bg: el trabajo actual no existe");
+            }
+
             valid = false;
         }
 
